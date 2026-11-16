@@ -38,18 +38,32 @@ def _client():
     return create_client(_supabase_url(_secret("SUPABASE_PROJECT")), _secret("SUPABASE_KEY"))
 
 
+def _teacher_exists(year: int, children_group_div: str, teacher_name: str) -> bool:
+    """같은 연도·조직·이름 행이 이미 있는지 확인한다."""
+    response = (
+        _client()
+        .table("srnch_teacher")
+        .select("year")
+        .eq("year", year)
+        .eq("children_group_div", children_group_div)
+        .eq("teacher_name", teacher_name)
+        .limit(1)
+        .execute()
+    )
+    return bool(response.data)
+
+
 def _save_teacher(year: int, children_group_div: str, teacher_name: str) -> None:
     """연도, 조직, 이름을 srnch_teacher에 저장한다."""
     (
         _client()
         .table("srnch_teacher")
-        .upsert(
+        .insert(
             {
                 "year": year,
                 "teacher_name": teacher_name,
                 "children_group_div": children_group_div,
-            },
-            on_conflict="year,teacher_name,children_group_div",
+            }
         )
         .execute()
     )
@@ -80,6 +94,11 @@ def _to_display_rows(rows: list[dict]) -> list[dict]:
     return display
 
 
+def _alert(message: str) -> None:
+    st.error(message)
+    st.toast(message, icon="⚠️")
+
+
 def _handle_save(year_text: str, group_text: str, name_text: str) -> int | None:
     year_text = year_text.strip()
     group_text = group_text.strip()
@@ -90,29 +109,33 @@ def _handle_save(year_text: str, group_text: str, name_text: str) -> int | None:
         if not value
     ]
     if missing:
-        st.error("빈칸이 있습니다: " + ", ".join(missing))
+        _alert("빈칸이 있습니다: " + ", ".join(missing))
         return None
 
     try:
         year = int(year_text)
     except ValueError:
-        st.error("연도는 숫자로 입력하세요.")
+        _alert("연도는 숫자로 입력하세요.")
         return None
     if not 2000 <= year <= 2100:
-        st.error("연도는 2000년부터 2100년까지 입력하세요.")
+        _alert("연도는 2000년부터 2100년까지 입력하세요.")
         return None
     if not GROUP_DIV_RE.fullmatch(group_text):
-        st.error("조직은 1-1-5 형식으로 입력하세요.")
+        _alert("조직은 1-1-5 형식으로 입력하세요.")
         return None
 
     try:
+        if _teacher_exists(year, group_text, name_text):
+            _alert(f"이미 같은 데이터가 있습니다: {year} / {group_text} / {name_text}")
+            return None
         _save_teacher(year, group_text, name_text)
     except Exception as exc:  # noqa: BLE001
-        st.error(f"저장하지 못했습니다: {exc}")
+        _alert(f"저장하지 못했습니다: {exc}")
         return None
 
     st.session_state["teacher_data_version"] = int(st.session_state.get("teacher_data_version", 0)) + 1
-    st.session_state["teacher_list_year"] = year
+    if year in YEAR_OPTIONS:
+        st.session_state["teacher_list_year"] = year
     return year
 
 
