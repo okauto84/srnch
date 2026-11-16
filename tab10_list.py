@@ -314,13 +314,31 @@ def _render_chat(members: list[dict]) -> None:
         return
 
     st.session_state.member_messages.append({"role": "user", "content": prompt})
-    try:
-        answer = _ask_openai(api_key, members, st.session_state.member_messages)
-    except Exception as exc:  # noqa: BLE001
-        st.session_state.member_chat_error = f"답변을 받지 못했습니다: {exc}"
-        st.rerun()
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
-    answer = _format_member_mentions(answer, members)
+    with st.chat_message("assistant"):
+        st.markdown('<span class="member-answer"></span>', unsafe_allow_html=True)
+        pending = st.empty()
+        with pending.container():
+            st.markdown(
+                """
+                <div class="member-chat-wait" role="status">
+                    <span class="member-chat-wait-spin" aria-hidden="true"></span>
+                    <span>답변을 작성하고 있습니다. 잠시만 기다려 주세요.</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            with st.spinner("답변을 작성하고 있습니다. 잠시만 기다려 주세요.", show_time=True):
+                try:
+                    answer = _ask_openai(api_key, members, st.session_state.member_messages)
+                except Exception as exc:  # noqa: BLE001
+                    st.session_state.member_chat_error = f"답변을 받지 못했습니다: {exc}"
+                    st.rerun()
+        answer = _format_member_mentions(answer, members)
+        pending.markdown(answer)
+
     st.session_state.member_messages.append({"role": "assistant", "content": answer})
     st.rerun()
 
@@ -359,6 +377,37 @@ def render() -> None:
         }
         [data-testid="stChatMessage"]:has(.member-answer) [data-testid="stMarkdown"]:has(.member-answer) {
             display: none;
+        }
+        .member-chat-wait {
+            position: fixed;
+            left: 50%;
+            bottom: calc(3.5rem + env(safe-area-inset-bottom));
+            transform: translateX(-50%);
+            z-index: 1001;
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+            max-width: calc(100% - 2rem);
+            padding: 0.5rem 0.95rem;
+            border-radius: 999px;
+            background: var(--secondary-background-color);
+            color: var(--text-color);
+            border: 1px solid rgba(128, 128, 128, 0.35);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+            font-size: 0.95rem;
+            line-height: 1.3;
+        }
+        .member-chat-wait-spin {
+            width: 0.95rem;
+            height: 0.95rem;
+            flex: 0 0 auto;
+            border: 2px solid rgba(128, 128, 128, 0.35);
+            border-top-color: currentColor;
+            border-radius: 50%;
+            animation: member-chat-spin 0.8s linear infinite;
+        }
+        @keyframes member-chat-spin {
+            to { transform: rotate(360deg); }
         }
         </style>
         """,
