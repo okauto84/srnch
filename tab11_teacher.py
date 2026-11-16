@@ -1,4 +1,4 @@
-"""통계 탭: 담임 정보를 srnch_teacher에 저장·조회한다."""
+"""담임정보 탭: 담임 정보를 srnch_teacher에 저장·조회한다."""
 
 from __future__ import annotations
 
