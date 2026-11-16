@@ -8,7 +8,7 @@ import streamlit as st
 from openai import OpenAI
 from supabase import create_client
 
-VISIBLE_ROWS = 15
+VISIBLE_ROWS = 10
 GRID_ROW_HEIGHT = 35
 
 # 화면 컬럼 순서. 키는 DB 컬럼, 값은 표시명.
