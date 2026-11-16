@@ -56,13 +56,6 @@ def _save_teacher(year: int, children_group_div: str, teacher_name: str) -> None
 
 
 @st.cache_data(ttl=30, show_spinner=False)
-def _fetch_years(_version: int) -> list[int]:
-    response = _client().table("srnch_teacher").select("year").order("year", desc=True).execute()
-    years = sorted({int(row["year"]) for row in (response.data or [])}, reverse=True)
-    return years
-
-
-@st.cache_data(ttl=30, show_spinner=False)
 def _fetch_teachers(year: int, _version: int) -> list[dict]:
     response = (
         _client()
@@ -85,10 +78,6 @@ def _to_display_rows(rows: list[dict]) -> list[dict]:
             item[label] = "" if value is None else str(value)
         display.append(item)
     return display
-
-
-def _year_options(db_years: list[int]) -> list[int]:
-    return sorted(set(db_years) | set(YEAR_OPTIONS))
 
 
 def _handle_save(year_text: str, group_text: str, name_text: str) -> int | None:
@@ -148,18 +137,16 @@ def render() -> None:
         st.success("저장했습니다.")
 
     version = int(st.session_state.get("teacher_data_version", 0))
-    try:
-        years = _year_options(_fetch_years(version))
-    except Exception as exc:  # noqa: BLE001
-        st.error(f"연도 목록을 불러오지 못했습니다: {exc}")
-        return
+    if st.session_state.get("teacher_list_year") not in YEAR_OPTIONS:
+        st.session_state["teacher_list_year"] = YEAR_OPTIONS[0]
 
-    current = st.session_state.get("teacher_list_year")
-    if current not in years:
-        st.session_state["teacher_list_year"] = 2026 if 2026 in years else years[0]
     year_col, _ = st.columns([1, 5])
     with year_col:
-        selected_year = st.selectbox("연도", options=years, key="teacher_list_year")
+        selected_year = st.selectbox(
+            "연도",
+            options=list(YEAR_OPTIONS),
+            key="teacher_list_year",
+        )
 
     try:
         rows = _fetch_teachers(int(selected_year), version)
