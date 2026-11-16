@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+import pandas as pd
 import streamlit as st
 from openai import OpenAI
 from supabase import create_client
@@ -24,7 +25,7 @@ VISIBLE_COLUMNS: tuple[tuple[str, str], ...] = (
 )
 
 PRE_PROMPT = """# 역할
-회원 명단을 보고 한국어로 짧게 답하는 조교.
+저는 어린이를 교육하는 교사로써, 학생 명단을 보고 한국어로 답하는 선생님.
 
 # 답변 규칙
 - 현재 데이터 기준으로 답변하고, 간략하게 답변하라.
@@ -85,26 +86,9 @@ def _supabase():
     )
 
 
-def _load_page(page: int) -> tuple[list[dict], int]:
-    client = _supabase()
-    start = page * PAGE_SIZE
-    end = start + PAGE_SIZE - 1
-    columns = ",".join(key for key, _label in VISIBLE_COLUMNS)
-    response = (
-        client.table("srnch_members")
-        .select(columns, count="exact")
-        .order("name")
-        .order("id")
-        .range(start, end)
-        .execute()
-    )
-    rows = response.data or []
-    total = int(response.count or 0)
-    return rows, total
-
-
-def _load_all() -> list[dict]:
-    columns = ",".join(key for key, _label in VISIBLE_COLUMNS)
+def _load_indexed() -> list[dict]:
+    """그리드와 같은 정렬(이름, id)로 전체 회원을 읽고 위치 번호를 붙인다."""
+    columns = "id," + ",".join(key for key, _label in VISIBLE_COLUMNS)
     response = (
         _supabase()
         .table("srnch_members")
@@ -114,7 +98,84 @@ def _load_all() -> list[dict]:
         .limit(2000)
         .execute()
     )
-    return response.data or []
+    rows = response.data or []
+    for index, row in enumerate(rows):
+        row["index"] = index
+    return rows
+
+
+def _focus_id() -> int | None:
+    raw = st.query_params.get("focus")
+    if isinstance(raw, list):
+        raw = raw[0] if raw else None
+    if raw is None or str(raw).strip() == "":
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _member_href(member: dict) -> str:
+    page = int(member["index"]) // PAGE_SIZE
+    return f"?member_page={page}&focus={member['id']}"
+
+
+def _linkify_members(text: str, members: list[dict]) -> str:
+    """답변 안의 회원 이름을 그리드 위치 링크로 바꾼다."""
+    grouped: dict[str, list[dict]] = {}
+    for member in members:
+        name = str(member.get("name") or "").strip()
+        if name:
+            grouped.setdefault(name, []).append(member)
+    if not grouped or not text:
+        return text
+
+    occupied = [False] * len(text)
+    spans: list[tuple[int, int, str]] = []
+    for name in sorted(grouped, key=len, reverse=True):
+        start = 0
+        while True:
+            found = text.find(name, start)
+            if found < 0:
+                break
+            end = found + len(name)
+            if not any(occupied[found:end]):
+                spans.append((found, end, name))
+                for pos in range(found, end):
+                    occupied[pos] = True
+            start = found + 1
+
+    parts: list[str] = []
+    cursor = 0
+    for start, end, name in sorted(spans):
+        parts.append(text[cursor:start])
+        group = grouped[name]
+        if len(group) == 1:
+            parts.append(f"[{name}]({_member_href(group[0])})")
+        else:
+            links = []
+            for member in group:
+                mark = str(member.get("name_distinct") or "").strip() or "구분없음"
+                links.append(f"[{name} {mark}]({_member_href(member)})")
+            parts.append(" / ".join(links))
+        cursor = end
+    parts.append(text[cursor:])
+    return "".join(parts)
+
+
+def _grid_data(rows: list[dict], focus_id: int | None):
+    frame = pd.DataFrame(_to_display_rows(rows))
+    if focus_id is None or frame.empty:
+        return frame
+    ids = [row.get("id") for row in rows]
+
+    def paint(row: pd.Series) -> list[str]:
+        if ids[row.name] == focus_id:
+            return ["background-color: rgba(255, 214, 102, 0.55)"] * len(row)
+        return [""] * len(row)
+
+    return frame.style.apply(paint, axis=1)
 
 
 def _to_display_rows(rows: list[dict]) -> list[dict]:
@@ -144,8 +205,7 @@ def _ask_openai(api_key: str, system: str, history: list[dict[str, str]]) -> str
     return (response.choices[0].message.content or "").strip()
 
 
-def _render_chat() -> None:
-    st.divider()
+def _render_chat(members: list[dict]) -> None:
     try:
         api_key = _secret("openai_api_key")
     except Exception as exc:  # noqa: BLE001
@@ -155,38 +215,38 @@ def _render_chat() -> None:
     if "member_messages" not in st.session_state:
         st.session_state.member_messages = []
 
-    for message in st.session_state.member_messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    error = st.session_state.pop("member_chat_error", "")
+    if error:
+        st.error(error)
 
-    prompt = st.chat_input("회원 데이터에 대해 질문하세요")
+    with st.container(height=320):
+        st.markdown('<span class="member-chat-dock"></span>', unsafe_allow_html=True)
+        for message in st.session_state.member_messages:
+            content = message["content"]
+            if message["role"] == "assistant":
+                content = _linkify_members(content, members)
+            with st.chat_message(message["role"]):
+                st.markdown(content)
+        prompt = st.chat_input("회원 데이터에 대해 질문하세요")
+
     if not prompt:
         return
 
     st.session_state.member_messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
     try:
-        answer = _ask_openai(api_key, _system_prompt(_load_all()), st.session_state.member_messages)
+        answer = _ask_openai(api_key, _system_prompt(members), st.session_state.member_messages)
     except Exception as exc:  # noqa: BLE001
-        st.error(f"답변을 받지 못했습니다: {exc}")
-        return
+        st.session_state.member_chat_error = f"답변을 받지 못했습니다: {exc}"
+        st.rerun()
 
     st.session_state.member_messages.append({"role": "assistant", "content": answer})
-    with st.chat_message("assistant"):
-        st.markdown(answer)
+    st.rerun()
 
 
 def render() -> None:
     st.markdown(
         """
         <style>
-        div[data-testid="stDataFrame"] {
-            width: 100%;
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-        }
         .member-pager {
             text-align: left;
             font-size: 0.78rem;
@@ -204,11 +264,21 @@ def render() -> None:
         .member-pager .muted {
             color: #bbb;
         }
-        @media (max-width: 900px) {
-            div[data-testid="stDataFrame"] [data-testid="glideDataEditor"],
-            div[data-testid="stDataFrame"] > div {
-                min-width: 1044px;
-            }
+        [data-testid="stVerticalBlock"][style*="overflow"]:has(.member-chat-dock) {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 1000;
+            height: 42vh !important;
+            max-height: 42vh;
+            box-sizing: border-box;
+            padding: 0.35rem 1rem 0.15rem 1rem;
+            background: var(--background-color);
+            border-top: 1px solid rgba(128, 128, 128, 0.35);
+        }
+        .block-container {
+            padding-bottom: 46vh;
         }
         </style>
         """,
@@ -216,26 +286,35 @@ def render() -> None:
     )
 
     raw_page = st.query_params.get("member_page", "0")
+    if isinstance(raw_page, list):
+        raw_page = raw_page[0] if raw_page else "0"
     try:
         page = max(0, int(raw_page))
     except (TypeError, ValueError):
         page = 0
 
     try:
-        rows, total = _load_page(page)
+        indexed = _load_indexed()
     except Exception as exc:  # noqa: BLE001
         st.error(f"회원 목록을 불러오지 못했습니다: {exc}")
         return
 
+    focus_id = _focus_id()
+    if focus_id is not None:
+        matched = next((row for row in indexed if int(row.get("id")) == focus_id), None)
+        if matched is not None:
+            page = int(matched["index"]) // PAGE_SIZE
+
+    total = len(indexed)
     page_count = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
     if page > page_count - 1:
         page = page_count - 1
-        rows, total = _load_page(page)
+    rows = indexed[page * PAGE_SIZE : (page + 1) * PAGE_SIZE]
 
     st.caption(f"총 {total}건")
     if total == 0:
         st.info("표시할 회원이 없습니다.")
-        _render_chat()
+        _render_chat(indexed)
         return
 
     prev_html = (
@@ -259,8 +338,12 @@ def render() -> None:
         unsafe_allow_html=True,
     )
 
+    if focus_id is not None and any(int(row.get("id")) == focus_id for row in rows):
+        focused = next(row for row in rows if int(row.get("id")) == focus_id)
+        st.caption(f"선택: {focused.get('name')}")
+
     st.dataframe(
-        _to_display_rows(rows),
+        _grid_data(rows, focus_id),
         hide_index=True,
         use_container_width=True,
         column_order=[label for _key, label in VISIBLE_COLUMNS],
@@ -269,4 +352,4 @@ def render() -> None:
             for _key, label in VISIBLE_COLUMNS
         },
     )
-    _render_chat()
+    _render_chat(indexed)
