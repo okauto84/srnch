@@ -219,15 +219,13 @@ def _render_chat(members: list[dict]) -> None:
     if error:
         st.error(error)
 
-    with st.container(height=320):
-        st.markdown('<span class="member-chat-dock"></span>', unsafe_allow_html=True)
-        for message in st.session_state.member_messages:
-            content = message["content"]
-            if message["role"] == "assistant":
-                content = _linkify_members(content, members)
-            with st.chat_message(message["role"]):
-                st.markdown(content)
-        prompt = st.chat_input("회원 데이터에 대해 질문하세요")
+    for message in st.session_state.member_messages:
+        content = message["content"]
+        if message["role"] == "assistant":
+            content = _linkify_members(content, members)
+        with st.chat_message(message["role"]):
+            st.markdown(content)
+    prompt = st.chat_input("회원 데이터에 대해 질문하세요")
 
     if not prompt:
         return
@@ -264,21 +262,8 @@ def render() -> None:
         .member-pager .muted {
             color: #bbb;
         }
-        [data-testid="stVerticalBlock"][style*="overflow"]:has(.member-chat-dock) {
-            position: fixed;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            z-index: 1000;
-            height: 42vh !important;
-            max-height: 42vh;
-            box-sizing: border-box;
-            padding: 0.35rem 1rem 0.15rem 1rem;
-            background: var(--background-color);
-            border-top: 1px solid rgba(128, 128, 128, 0.35);
-        }
         .block-container {
-            padding-bottom: 46vh;
+            padding-bottom: 4.5rem;
         }
         </style>
         """,
