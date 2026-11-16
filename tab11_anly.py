@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 
 import streamlit as st
 from supabase import create_client
@@ -53,8 +54,14 @@ def _teacher_exists(year: int, children_group_div: str, teacher_name: str) -> bo
     return bool(response.data)
 
 
+def _today() -> str:
+    """연-월-일만 저장한다. 시간은 넣지 않는다."""
+    return date.today().isoformat()
+
+
 def _save_teacher(year: int, children_group_div: str, teacher_name: str) -> None:
     """연도, 조직, 이름을 srnch_teacher에 저장한다."""
+    today = _today()
     (
         _client()
         .table("srnch_teacher")
@@ -63,6 +70,8 @@ def _save_teacher(year: int, children_group_div: str, teacher_name: str) -> None
                 "year": year,
                 "teacher_name": teacher_name,
                 "children_group_div": children_group_div,
+                "created_at": today,
+                "updated_at": today,
             }
         )
         .execute()

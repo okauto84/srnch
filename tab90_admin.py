@@ -51,6 +51,8 @@ MEMBER_FIELDS = (
     "leader2_duty2",
     "leader2_mobile",
     "leader2_children_group",
+    "created_at",
+    "updated_at",
 )
 
 
@@ -256,6 +258,8 @@ def map_person_row(row: dict[str, Any]) -> dict[str, Any] | None:
         "leader2_duty2": _as_text(row.get("leader2Duty2")),
         "leader2_mobile": _first_text(row, "leader2MobileNum", "leader2Mobile"),
         "leader2_children_group": _first_text(row, "leader2Group", "leader2ChildrenGroup"),
+        "created_at": date.today().isoformat(),
+        "updated_at": date.today().isoformat(),
     }
 
 
