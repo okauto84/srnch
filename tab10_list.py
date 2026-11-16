@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import streamlit as st
 from openai import OpenAI
 from supabase import create_client
@@ -21,7 +23,29 @@ VISIBLE_COLUMNS: tuple[tuple[str, str], ...] = (
     ("jibeon_address", "지번주소"),
 )
 
-PRE_PROMPT = "현재 데이터 기준으로 답변하고, 간략하게 답변하라."
+PRE_PROMPT = """# 역할
+회원 명단을 보고 한국어로 짧게 답하는 조교.
+
+# 답변 규칙
+- 현재 데이터 기준으로 답변하고, 간략하게 답변하라.
+- 근거는 아래 members 배열뿐이다. 배열에 없는 사실은 "데이터에 없습니다"라고 답한다.
+- 인원과 조건 검색은 members의 필드를 직접 세고 비교한다.
+- 여러 명이면 이름만 나열한다.
+
+# 필드
+- 이름: 회원 이름
+- 구분: 동명이인을 나누는 한 글자. 없으면 빈 문자열
+- 성별: 남 또는 여
+- 어린이 조직: "03.유년 - 유년1부 - 2학년 - 05반" 형태의 조직 경로
+- 생년월일: YYYY-MM-DD
+- 나이: 정수
+- 휴대전화: 전화번호 문자열
+- 세대주: 세대주 이름
+- 지번주소: 지번 주소
+
+# members
+{members}
+"""
 
 COLUMN_WIDTHS = {
     "이름": 90,
@@ -105,17 +129,15 @@ def _to_display_rows(rows: list[dict]) -> list[dict]:
 
 
 def _system_prompt(rows: list[dict]) -> str:
-    header = "\t".join(label for _key, label in VISIBLE_COLUMNS)
-    lines = [header]
-    for row in _to_display_rows(rows):
-        lines.append("\t".join(str(row[label]) for _key, label in VISIBLE_COLUMNS))
-    return f"{PRE_PROMPT}\n\n[현재 데이터]\n" + "\n".join(lines)
+    members = json.dumps(_to_display_rows(rows), ensure_ascii=False, indent=2, default=str)
+    return PRE_PROMPT.format(members=members)
 
 
 def _ask_openai(api_key: str, system: str, history: list[dict[str, str]]) -> str:
     client = OpenAI(api_key=api_key)
     response = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-6.1-terra",
+        reasoning_effort="none",
         temperature=0.2,
         messages=[{"role": "system", "content": system}, *history],
     )
