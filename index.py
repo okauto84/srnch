@@ -22,36 +22,13 @@ st.markdown(
         padding-bottom: 1.5rem;
         max-width: 100%;
     }
-    .top-bar {
-        display: flex;
-        align-items: center;
-        padding: 0.7rem 1rem;
-        margin: 0 0 0.25rem 0;
-        border: 1px solid #d9d9d9;
-        border-bottom: none;
-        background: #f7f7f7;
-        border-radius: 0.4rem 0.4rem 0 0;
-    }
-    .brand {
-        font-size: 1.35rem;
-        font-weight: 700;
-        letter-spacing: -0.02em;
-        color: #1a1a1a;
-        white-space: nowrap;
-    }
-    .content-frame {
-        border: 1px solid #d9d9d9;
-        border-radius: 0 0 0.4rem 0.4rem;
-        padding: 0.5rem 0.25rem 0.25rem 0.25rem;
-        min-height: 70vh;
-    }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 # 상단 메뉴바: 왼쪽 제목
-st.markdown('<div class="top-bar"><div class="brand">새꿈이</div></div>', unsafe_allow_html=True)
+st.markdown("### 새꿈이")
 
 # 메뉴 탭 + 하단 콘텐츠 영역
 tab_list, tab_temp = st.tabs(["목록", "임시"])
