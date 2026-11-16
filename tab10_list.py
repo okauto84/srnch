@@ -25,11 +25,11 @@ PRE_PROMPT = "현재 데이터 기준으로 답변하고, 간략하게 답변하
 
 COLUMN_WIDTHS = {
     "이름": 90,
-    "구분": 80,
-    "성별": 60,
+    "구분": 48,
+    "성별": 48,
     "어린이 조직": 240,
     "생년월일": 110,
-    "나이": 60,
+    "나이": 48,
     "휴대전화": 130,
     "세대주": 90,
     "지번주소": 280,
@@ -185,7 +185,7 @@ def render() -> None:
         @media (max-width: 900px) {
             div[data-testid="stDataFrame"] [data-testid="glideDataEditor"],
             div[data-testid="stDataFrame"] > div {
-                min-width: 1140px;
+                min-width: 1044px;
             }
         }
         </style>
