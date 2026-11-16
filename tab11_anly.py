@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import re
-from datetime import date
 
 import streamlit as st
 from supabase import create_client
 
 GROUP_DIV_RE = re.compile(r"^[0-9]+-[0-9]+-[0-9]+$")
+YEAR_OPTIONS = (2026, 2027)
 GRID_COLUMNS = (
     ("year", "연도"),
     ("children_group_div", "조직"),
@@ -82,9 +82,13 @@ def _to_display_rows(rows: list[dict]) -> list[dict]:
         item = {}
         for key, label in GRID_COLUMNS:
             value = row.get(key)
-            item[label] = "" if value is None else value
+            item[label] = "" if value is None else str(value)
         display.append(item)
     return display
+
+
+def _year_options(db_years: list[int]) -> list[int]:
+    return sorted(set(db_years) | set(YEAR_OPTIONS))
 
 
 def _handle_save(year_text: str, group_text: str, name_text: str) -> int | None:
@@ -143,17 +147,14 @@ def render() -> None:
 
     version = int(st.session_state.get("teacher_data_version", 0))
     try:
-        years = _fetch_years(version)
+        years = _year_options(_fetch_years(version))
     except Exception as exc:  # noqa: BLE001
         st.error(f"연도 목록을 불러오지 못했습니다: {exc}")
         return
 
-    if not years:
-        years = [date.today().year]
-
     current = st.session_state.get("teacher_list_year")
     if current not in years:
-        st.session_state["teacher_list_year"] = years[0]
+        st.session_state["teacher_list_year"] = 2026 if 2026 in years else years[0]
     year_col, _ = st.columns([1, 5])
     with year_col:
         selected_year = st.selectbox("연도", options=years, key="teacher_list_year")
@@ -168,9 +169,14 @@ def render() -> None:
         st.info(f"{selected_year}년 담임 정보가 없습니다.")
         return
 
+    labels = [label for _key, label in GRID_COLUMNS]
     st.dataframe(
         _to_display_rows(rows),
         hide_index=True,
         use_container_width=True,
-        column_order=[label for _key, label in GRID_COLUMNS],
+        column_order=labels,
+        column_config={
+            label: st.column_config.TextColumn(label, alignment="center")
+            for label in labels
+        },
     )
