@@ -8,7 +8,8 @@ import streamlit as st
 from openai import OpenAI
 from supabase import create_client
 
-PAGE_SIZE = 15
+VISIBLE_ROWS = 15
+GRID_ROW_HEIGHT = 35
 
 # 화면 컬럼 순서. 키는 DB 컬럼, 값은 표시명.
 VISIBLE_COLUMNS: tuple[tuple[str, str], ...] = (
@@ -80,18 +81,12 @@ def _supabase_url(project: str) -> str:
     return f"https://{project}.supabase.co"
 
 
-def _supabase():
-    return create_client(
-        _supabase_url(_secret("SUPABASE_PROJECT")),
-        _secret("SUPABASE_KEY"),
-    )
-
-
-def _load_indexed() -> list[dict]:
-    """그리드와 같은 정렬(이름, id)로 전체 회원을 읽는다."""
-    columns = "id,children_group_div," + ",".join(key for key, _label in VISIBLE_COLUMNS)
+@st.cache_data(ttl=30, show_spinner=False)
+def _fetch_members(url: str, key: str) -> list[dict]:
+    """회원 목록을 잠시 보관한다."""
+    columns = "id,children_group_div," + ",".join(column for column, _label in VISIBLE_COLUMNS)
     response = (
-        _supabase()
+        create_client(url, key)
         .table("srnch_members")
         .select(columns)
         .order("name")
@@ -100,6 +95,11 @@ def _load_indexed() -> list[dict]:
         .execute()
     )
     return response.data or []
+
+
+def _load_indexed() -> list[dict]:
+    """그리드와 같은 정렬(이름, id)로 전체 회원을 읽는다."""
+    return _fetch_members(_supabase_url(_secret("SUPABASE_PROJECT")), _secret("SUPABASE_KEY"))
 
 
 def _member_label(member: dict) -> str:
@@ -271,28 +271,6 @@ def render() -> None:
     st.markdown(
         """
         <style>
-        .member-pager {
-            color: var(--text-color);
-            font-size: 0.9rem;
-            line-height: 1.8;
-            margin: 0;
-        }
-        .st-key-member_prev button,
-        .st-key-member_next button {
-            background: transparent;
-            border: none;
-            box-shadow: none;
-            padding: 0 0.15rem;
-            min-height: 0;
-            color: var(--text-color);
-            text-decoration: underline;
-        }
-        .st-key-member_prev button:disabled,
-        .st-key-member_next button:disabled {
-            text-decoration: none;
-            opacity: 0.4;
-            color: var(--text-color);
-        }
         [data-testid="stChatInput"] textarea {
             min-height: 2rem !important;
             height: 2rem !important;
@@ -320,50 +298,27 @@ def render() -> None:
         unsafe_allow_html=True,
     )
 
-    if "member_page" not in st.session_state:
-        st.session_state.member_page = 0
-
     try:
         indexed = _load_indexed()
     except Exception as exc:  # noqa: BLE001
         st.error(f"회원 목록을 불러오지 못했습니다: {exc}")
         return
 
-    total = len(indexed)
-    page_count = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
-    page = min(max(0, int(st.session_state.member_page)), page_count - 1)
-    st.session_state.member_page = page
-    rows = indexed[page * PAGE_SIZE : (page + 1) * PAGE_SIZE]
-
-    st.caption(f"총 {total}건")
-    if total == 0:
+    st.caption(f"총 {len(indexed)}건")
+    if not indexed:
         st.info("표시할 회원이 없습니다.")
         _render_chat(indexed)
         return
 
     st.dataframe(
-        _to_display_rows(rows),
+        _to_display_rows(indexed),
         hide_index=True,
         use_container_width=True,
+        height=GRID_ROW_HEIGHT * (min(len(indexed), VISIBLE_ROWS) + 1),
         column_order=[label for _key, label in VISIBLE_COLUMNS],
         column_config={
             label: st.column_config.TextColumn(label, width=COLUMN_WIDTHS[label])
             for _key, label in VISIBLE_COLUMNS
         },
     )
-
-    prev_col, page_col, next_col, _rest = st.columns([0.7, 0.9, 0.7, 8])
-    with prev_col:
-        if st.button("이전", key="member_prev", disabled=page <= 0):
-            st.session_state.member_page = page - 1
-            st.rerun()
-    with page_col:
-        st.markdown(
-            f'<div class="member-pager">{page + 1} / {page_count}</div>',
-            unsafe_allow_html=True,
-        )
-    with next_col:
-        if st.button("다음", key="member_next", disabled=page >= page_count - 1):
-            st.session_state.member_page = page + 1
-            st.rerun()
     _render_chat(indexed)
