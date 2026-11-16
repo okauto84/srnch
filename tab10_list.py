@@ -273,20 +273,23 @@ def render() -> None:
         <style>
         .member-pager {
             text-align: left;
-            font-size: 0.78rem;
-            line-height: 1.2;
-            color: #666;
-            margin: 0 0 0.35rem 0;
+            font-size: 0.9rem;
+            line-height: 1.4;
+            color: var(--text-color);
+            margin: 0.15rem 0 0.45rem 0;
         }
         .member-pager a {
-            color: #333;
-            text-decoration: none;
+            color: var(--text-color);
+            text-decoration: underline;
         }
         .member-pager .page-no {
             margin: 0 0.45rem;
+            color: var(--text-color);
         }
         .member-pager .muted {
-            color: #bbb;
+            color: var(--text-color);
+            opacity: 0.4;
+            text-decoration: none;
         }
         [data-testid="stChatInput"] textarea {
             min-height: 2rem !important;
