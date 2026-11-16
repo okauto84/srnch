@@ -5,6 +5,7 @@ from __future__ import annotations
 import streamlit as st
 
 import tab10_list
+import tab90_admin
 
 st.set_page_config(
     page_title="새꿈이",
@@ -37,4 +38,4 @@ with tab_list:
     tab10_list.render()
 
 with tab_temp:
-    st.info("임시 탭입니다. 내용을 추가하세요.")
+    tab90_admin.render()
