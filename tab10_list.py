@@ -283,6 +283,16 @@ def render() -> None:
     st.markdown(
         """
         <style>
+        [data-testid="stBottom"] {
+            position: fixed !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            width: 100% !important;
+            z-index: 1000;
+            background: var(--background-color);
+            padding-bottom: env(safe-area-inset-bottom);
+        }
         [data-testid="stChatInput"] textarea {
             min-height: 2rem !important;
             height: 2rem !important;
@@ -291,13 +301,12 @@ def render() -> None:
             line-height: 1.3;
         }
         [data-testid="stChatInput"],
-        [data-testid="stBottom"],
         [data-testid="stBottomBlockContainer"] {
             padding-top: 0.15rem;
             padding-bottom: 0.15rem;
         }
         .block-container {
-            padding-bottom: 3.2rem;
+            padding-bottom: 4.5rem;
         }
         [data-testid="stChatMessage"]:has(.member-answer) {
             margin-left: 1.15rem;
