@@ -272,24 +272,26 @@ def render() -> None:
         """
         <style>
         .member-pager {
-            text-align: left;
-            font-size: 0.9rem;
-            line-height: 1.4;
             color: var(--text-color);
-            margin: 0.15rem 0 0.45rem 0;
+            font-size: 0.9rem;
+            line-height: 1.8;
+            margin: 0;
         }
-        .member-pager a {
+        .st-key-member_prev button,
+        .st-key-member_next button {
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            padding: 0 0.15rem;
+            min-height: 0;
             color: var(--text-color);
             text-decoration: underline;
         }
-        .member-pager .page-no {
-            margin: 0 0.45rem;
-            color: var(--text-color);
-        }
-        .member-pager .muted {
-            color: var(--text-color);
-            opacity: 0.4;
+        .st-key-member_prev button:disabled,
+        .st-key-member_next button:disabled {
             text-decoration: none;
+            opacity: 0.4;
+            color: var(--text-color);
         }
         [data-testid="stChatInput"] textarea {
             min-height: 2rem !important;
@@ -318,13 +320,8 @@ def render() -> None:
         unsafe_allow_html=True,
     )
 
-    raw_page = st.query_params.get("member_page", "0")
-    if isinstance(raw_page, list):
-        raw_page = raw_page[0] if raw_page else "0"
-    try:
-        page = max(0, int(raw_page))
-    except (TypeError, ValueError):
-        page = 0
+    if "member_page" not in st.session_state:
+        st.session_state.member_page = 0
 
     try:
         indexed = _load_indexed()
@@ -334,8 +331,8 @@ def render() -> None:
 
     total = len(indexed)
     page_count = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
-    if page > page_count - 1:
-        page = page_count - 1
+    page = min(max(0, int(st.session_state.member_page)), page_count - 1)
+    st.session_state.member_page = page
     rows = indexed[page * PAGE_SIZE : (page + 1) * PAGE_SIZE]
 
     st.caption(f"총 {total}건")
@@ -343,27 +340,6 @@ def render() -> None:
         st.info("표시할 회원이 없습니다.")
         _render_chat(indexed)
         return
-
-    prev_html = (
-        '<span class="muted">이전</span>'
-        if page <= 0
-        else f'<a href="?member_page={page - 1}">이전</a>'
-    )
-    next_html = (
-        '<span class="muted">다음</span>'
-        if page >= page_count - 1
-        else f'<a href="?member_page={page + 1}">다음</a>'
-    )
-    st.markdown(
-        (
-            '<div class="member-pager">'
-            f"{prev_html}"
-            f'<span class="page-no">{page + 1} / {page_count}</span>'
-            f"{next_html}"
-            "</div>"
-        ),
-        unsafe_allow_html=True,
-    )
 
     st.dataframe(
         _to_display_rows(rows),
@@ -375,4 +351,19 @@ def render() -> None:
             for _key, label in VISIBLE_COLUMNS
         },
     )
+
+    prev_col, page_col, next_col, _rest = st.columns([0.7, 0.9, 0.7, 8])
+    with prev_col:
+        if st.button("이전", key="member_prev", disabled=page <= 0):
+            st.session_state.member_page = page - 1
+            st.rerun()
+    with page_col:
+        st.markdown(
+            f'<div class="member-pager">{page + 1} / {page_count}</div>',
+            unsafe_allow_html=True,
+        )
+    with next_col:
+        if st.button("다음", key="member_next", disabled=page >= page_count - 1):
+            st.session_state.member_page = page + 1
+            st.rerun()
     _render_chat(indexed)
