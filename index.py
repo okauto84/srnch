@@ -5,6 +5,7 @@ from __future__ import annotations
 import streamlit as st
 
 import tab10_list
+import tab11_anly
 import tab90_admin
 
 st.set_page_config(
@@ -61,10 +62,13 @@ def _admin_password_ok() -> bool:
 st.markdown("### 새꿈이")
 
 # 메뉴 탭 + 하단 콘텐츠 영역
-tab_list, tab_admin = st.tabs(["목록", "ADMIN"])
+tab_list, tab_anly, tab_admin = st.tabs(["목록", "통계", "ADMIN"])
 
 with tab_list:
     tab10_list.render()
+
+with tab_anly:
+    tab11_anly.render()
 
 with tab_admin:
     if _admin_password_ok():
