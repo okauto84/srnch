@@ -124,26 +124,28 @@ def _handle_save(year_text: str, group_text: str, name_text: str) -> int | None:
 
     st.session_state["teacher_data_version"] = int(st.session_state.get("teacher_data_version", 0)) + 1
     st.session_state["teacher_list_year"] = year
-    st.success("저장했습니다.")
     return year
 
 
 def render() -> None:
     """담임 정보 입력과 연도별 목록."""
     st.markdown("**담임 정보**")
-    with st.form("teacher_form", clear_on_submit=False):
-        col_year, col_group, col_name, col_save = st.columns([1, 1.4, 1.2, 0.7], vertical_alignment="bottom")
-        with col_year:
-            year_text = st.text_input("연도")
-        with col_group:
-            group_text = st.text_input("조직", placeholder="1-1-5")
-        with col_name:
-            name_text = st.text_input("이름")
-        with col_save:
-            submitted = st.form_submit_button("저장", use_container_width=True)
+    col_year, col_group, col_name, col_save = st.columns([1, 1.4, 1.2, 0.7], vertical_alignment="bottom")
+    with col_year:
+        year_text = st.text_input("연도", key="teacher_input_year")
+    with col_group:
+        group_text = st.text_input("조직", placeholder="1-1-5", key="teacher_input_group")
+    with col_name:
+        name_text = st.text_input("이름", key="teacher_input_name")
+    with col_save:
+        submitted = st.button("저장", use_container_width=True, key="teacher_save_btn")
 
     if submitted:
-        _handle_save(year_text, group_text, name_text)
+        if _handle_save(year_text, group_text, name_text) is not None:
+            st.session_state["teacher_saved_msg"] = True
+
+    if st.session_state.pop("teacher_saved_msg", False):
+        st.success("저장했습니다.")
 
     version = int(st.session_state.get("teacher_data_version", 0))
     try:
