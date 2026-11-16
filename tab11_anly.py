@@ -128,10 +128,15 @@ def render() -> None:
     """담임 정보 입력과 연도별 목록."""
     st.markdown("**담임 정보**")
     with st.form("teacher_form", clear_on_submit=False):
-        year_text = st.text_input("연도")
-        group_text = st.text_input("조직", placeholder="1-1-5")
-        name_text = st.text_input("이름")
-        submitted = st.form_submit_button("저장")
+        col_year, col_group, col_name, col_save = st.columns([1, 1.4, 1.2, 0.7], vertical_alignment="bottom")
+        with col_year:
+            year_text = st.text_input("연도")
+        with col_group:
+            group_text = st.text_input("조직", placeholder="1-1-5")
+        with col_name:
+            name_text = st.text_input("이름")
+        with col_save:
+            submitted = st.form_submit_button("저장", use_container_width=True)
 
     if submitted:
         _handle_save(year_text, group_text, name_text)
@@ -149,7 +154,9 @@ def render() -> None:
     current = st.session_state.get("teacher_list_year")
     if current not in years:
         st.session_state["teacher_list_year"] = years[0]
-    selected_year = st.selectbox("연도", options=years, key="teacher_list_year")
+    year_col, _ = st.columns([1, 5])
+    with year_col:
+        selected_year = st.selectbox("연도", options=years, key="teacher_list_year")
 
     try:
         rows = _fetch_teachers(int(selected_year), version)
