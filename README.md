@@ -14,7 +14,7 @@ pip install -r requirements.txt
 ```
 
 3. 비밀 변수는 Streamlit Cloud Secrets에 등록합니다.
-   (`SUPABASE_PROJECT`, `SUPABASE_KEY`, `W_DIMODE_URL`, `W_DIMODE_ID`, `W_DIMODE_PW`, `W_DIMODE_URL_MEMBERS`, `ADMIN_PW`)
+   (`SUPABASE_PROJECT`, `SUPABASE_KEY`, `W_DIMODE_URL`, `W_DIMODE_ID`, `W_DIMODE_PW`, `W_DIMODE_URL_MEMBERS`, `ADMIN_PW`, `openai_api_key`)
 
 4. 실행
 
