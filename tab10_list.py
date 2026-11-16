@@ -28,8 +28,9 @@ PRE_PROMPT = """# 역할
 저는 어린이를 교육하는 교사로써, 학생 명단을 보고 한국어로 답변하는 선생님.
 
 # 답변 규칙
+- 모든 대화와 후속 질문에서 항상 아래 members 배열만 참고해 답한다.
 - 현재 데이터 기준으로 친절하게 답변하라.
-- 근거는 아래 members 배열뿐이다. 배열에 없는 사실은 "데이터에 없습니다"라고 답한다.
+- 근거는 members 배열뿐이다. 배열에 없는 사실은 "데이터에 없습니다"라고 답한다.
 - 인원과 조건 검색은 members의 필드를 직접 세고 비교한다.
 - 학생을 지칭할 때는 반드시 `이름구분(어린이 조직 div)` 형식으로 쓴다. 예: 고승아A(2-1-13)
 - 여러 명이면 그 형식으로 나열한다.
@@ -210,18 +211,29 @@ def _to_display_rows(rows: list[dict]) -> list[dict]:
     return display
 
 
-def _system_prompt(rows: list[dict]) -> str:
-    members = json.dumps(_prompt_rows(rows), ensure_ascii=False, indent=2, default=str)
-    return PRE_PROMPT.format(members=members)
+def _members_json(rows: list[dict]) -> str:
+    return json.dumps(_prompt_rows(rows), ensure_ascii=False, indent=2, default=str)
 
 
-def _ask_openai(api_key: str, system: str, history: list[dict[str, str]]) -> str:
+def _api_messages(rows: list[dict], history: list[dict[str, str]]) -> list[dict[str, str]]:
+    """화면에 보이는 대화와 달리, 모델에는 매 질문마다 members를 붙인다."""
+    members = _members_json(rows)
+    messages = [{"role": "system", "content": PRE_PROMPT.format(members=members)}]
+    for message in history:
+        content = message["content"]
+        if message["role"] == "user":
+            content = f"{content}\n\n아래 members만 참고해서 답하라.\n{members}"
+        messages.append({"role": message["role"], "content": content})
+    return messages
+
+
+def _ask_openai(api_key: str, rows: list[dict], history: list[dict[str, str]]) -> str:
     client = OpenAI(api_key=api_key)
     response = client.chat.completions.create(
         model="gpt-6.1-terra",
         reasoning_effort="none",
         temperature=0.2,
-        messages=[{"role": "system", "content": system}, *history],
+        messages=_api_messages(rows, history),
     )
     return (response.choices[0].message.content or "").strip()
 
@@ -257,7 +269,7 @@ def _render_chat(members: list[dict]) -> None:
 
     st.session_state.member_messages.append({"role": "user", "content": prompt})
     try:
-        answer = _ask_openai(api_key, _system_prompt(members), st.session_state.member_messages)
+        answer = _ask_openai(api_key, members, st.session_state.member_messages)
     except Exception as exc:  # noqa: BLE001
         st.session_state.member_chat_error = f"답변을 받지 못했습니다: {exc}"
         st.rerun()
