@@ -1,37 +1,91 @@
--- srnch_members: 회원 명단
+-- srnch_members: 회원 명단 (교인 엑셀 컬럼 기준)
 -- Supabase SQL Editor 또는 `supabase db push` 로 실행
+-- 스키마 변경 시 002_alter_srnch_members_excel_columns.sql 도 참고
 
 create extension if not exists "pgcrypto";
 
 create table if not exists public.srnch_members (
-    id uuid primary key default gen_random_uuid(),
+    id bigint primary key,                       -- id (디모데 교인 ID)
     name text not null,                          -- 이름
-    gender text,                                 -- 성별
-    organization text,                           -- 조직
+    name_distinct text,                          -- 구분자
+    children_group text,                         -- 어린이
+    children_group_div text,                     -- 어린이 정규화 (부-학년-반)
+    member_type1 text,                           -- 교인 구분1
+    member_type2 text,                           -- 교인 구분2
     birth_date date,                             -- 생년월일
+    age integer,                                 -- 나이
     mobile text,                                 -- 휴대전화
+    gender text,                                 -- 성별
+    spouse_duty text,                            -- 배우자 직분
     household_head text,                         -- 세대주
-    relationship_to_head text,                   -- 세대주와의 관계
-    address text,                                -- 주소
+    relationship_to_head text,                   -- 세대주와 관계
+    jibeon_address text,                         -- 지번주소
+    duty1 text,                                  -- 직분1
+    duty2 text,                                  -- 직분2
+    family text,                                 -- 가족
+    registered_at timestamptz,                   -- 등록일
+    last_updated_at timestamptz,                 -- 최근업데이트일
+    last_visit_at date,                          -- 최근심방일
+    last_attendance_at date,                     -- 최근출석일
+    last_offering_at date,                       -- 최근헌금일
+    welcome_at date,                             -- 환영일
+    spouse_mobile text,                          -- 배우자 연락처
+    leader1 text,                                -- 인도자1
+    leader1_duty1 text,                          -- 인도자1 직분1
+    leader1_duty2 text,                          -- 인도자1 직분2
+    leader1_mobile text,                         -- 인도자1 휴대전화
+    leader1_children_group text,                 -- 인도자1어린이Group
+    leader2 text,                                -- 인도자2
+    leader2_duty1 text,                          -- 인도자2 직분1
+    leader2_duty2 text,                          -- 인도자2 직분2
+    leader2_mobile text,                         -- 인도자2 휴대전화
+    leader2_children_group text,                 -- 인도자2어린이Group
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
 );
 
-comment on table public.srnch_members is '회원 명단';
+comment on table public.srnch_members is '회원 명단 (교인 엑셀 컬럼 기준)';
+comment on column public.srnch_members.id is 'id';
 comment on column public.srnch_members.name is '이름';
-comment on column public.srnch_members.gender is '성별';
-comment on column public.srnch_members.organization is '조직';
+comment on column public.srnch_members.name_distinct is '구분자';
+comment on column public.srnch_members.children_group is '어린이';
+comment on column public.srnch_members.children_group_div is '어린이 정규화 (부-학년-반)';
+comment on column public.srnch_members.member_type1 is '교인 구분1';
+comment on column public.srnch_members.member_type2 is '교인 구분2';
 comment on column public.srnch_members.birth_date is '생년월일';
+comment on column public.srnch_members.age is '나이';
 comment on column public.srnch_members.mobile is '휴대전화';
+comment on column public.srnch_members.gender is '성별';
+comment on column public.srnch_members.spouse_duty is '배우자 직분';
 comment on column public.srnch_members.household_head is '세대주';
-comment on column public.srnch_members.relationship_to_head is '세대주와의 관계';
-comment on column public.srnch_members.address is '주소';
+comment on column public.srnch_members.relationship_to_head is '세대주와 관계';
+comment on column public.srnch_members.jibeon_address is '지번주소';
+comment on column public.srnch_members.duty1 is '직분1';
+comment on column public.srnch_members.duty2 is '직분2';
+comment on column public.srnch_members.family is '가족';
+comment on column public.srnch_members.registered_at is '등록일';
+comment on column public.srnch_members.last_updated_at is '최근업데이트일';
+comment on column public.srnch_members.last_visit_at is '최근심방일';
+comment on column public.srnch_members.last_attendance_at is '최근출석일';
+comment on column public.srnch_members.last_offering_at is '최근헌금일';
+comment on column public.srnch_members.welcome_at is '환영일';
+comment on column public.srnch_members.spouse_mobile is '배우자 연락처';
+comment on column public.srnch_members.leader1 is '인도자1';
+comment on column public.srnch_members.leader1_duty1 is '인도자1 직분1';
+comment on column public.srnch_members.leader1_duty2 is '인도자1 직분2';
+comment on column public.srnch_members.leader1_mobile is '인도자1 휴대전화';
+comment on column public.srnch_members.leader1_children_group is '인도자1어린이Group';
+comment on column public.srnch_members.leader2 is '인도자2';
+comment on column public.srnch_members.leader2_duty1 is '인도자2 직분1';
+comment on column public.srnch_members.leader2_duty2 is '인도자2 직분2';
+comment on column public.srnch_members.leader2_mobile is '인도자2 휴대전화';
+comment on column public.srnch_members.leader2_children_group is '인도자2어린이Group';
 
 create index if not exists idx_srnch_members_name
     on public.srnch_members (name);
 
-create index if not exists idx_srnch_members_organization
-    on public.srnch_members (organization);
+create index if not exists idx_srnch_members_children_group
+    on public.srnch_members (children_group);
 
 create index if not exists idx_srnch_members_household_head
     on public.srnch_members (household_head);
@@ -54,7 +108,6 @@ create trigger trg_srnch_members_updated_at
 
 alter table public.srnch_members enable row level security;
 
--- 인증된 사용자 전체 CRUD (필요 시 정책 조정)
 drop policy if exists "srnch_members_select_authenticated" on public.srnch_members;
 create policy "srnch_members_select_authenticated"
     on public.srnch_members

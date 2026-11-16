@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
@@ -15,14 +15,41 @@ from supabase import Client, create_client
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 MEMBER_FIELDS = (
+    "id",
     "name",
-    "gender",
-    "organization",
+    "name_distinct",
+    "children_group",
+    "children_group_div",
+    "member_type1",
+    "member_type2",
     "birth_date",
+    "age",
     "mobile",
+    "gender",
+    "spouse_duty",
     "household_head",
     "relationship_to_head",
-    "address",
+    "jibeon_address",
+    "duty1",
+    "duty2",
+    "family",
+    "registered_at",
+    "last_updated_at",
+    "last_visit_at",
+    "last_attendance_at",
+    "last_offering_at",
+    "welcome_at",
+    "spouse_mobile",
+    "leader1",
+    "leader1_duty1",
+    "leader1_duty2",
+    "leader1_mobile",
+    "leader1_children_group",
+    "leader2",
+    "leader2_duty1",
+    "leader2_duty2",
+    "leader2_mobile",
+    "leader2_children_group",
 )
 
 
@@ -49,7 +76,7 @@ def _get_supabase() -> Client:
 
 
 def _site_root(base_url: str) -> str:
-    """https://w.dimode.co.kr/srnch/... -> https://w.dimode.co.kr/srnch"""
+    """base URL에서 site root 경로를 추출한다."""
     parsed = urlparse(base_url.strip())
     parts = [p for p in parsed.path.split("/") if p]
     site = parts[0] if parts else ""
@@ -62,9 +89,30 @@ def _origin(base_url: str) -> str:
     return urlunparse((parsed.scheme, parsed.netloc, "", "", "", ""))
 
 
-def _parse_birth_date(value: Any) -> str | None:
+def _as_text(value: Any) -> str | None:
     if value is None:
         return None
+    text = str(value).strip()
+    return text or None
+
+
+def _as_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_date(value: Any) -> str | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+
     text = str(value).strip()
     if not text:
         return None
@@ -75,56 +123,114 @@ def _parse_birth_date(value: Any) -> str | None:
         except ValueError:
             continue
     digits = re.sub(r"\D", "", text)
-    if len(digits) == 8:
+    if len(digits) >= 8:
         try:
-            return datetime.strptime(digits, "%Y%m%d").date().isoformat()
+            return datetime.strptime(digits[:8], "%Y%m%d").date().isoformat()
         except ValueError:
             return None
     return None
 
 
-def _compose_address(row: dict[str, Any]) -> str | None:
-    for key in ("addrRoadAddr", "addrDongAddr"):
-        val = row.get(key)
-        if val:
-            detail = str(row.get("addrDetail") or "").strip()
-            base = str(val).strip()
-            return f"{base} {detail}".strip() if detail else base
+def _parse_timestamptz(value: Any) -> str | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time()).isoformat()
 
-    parts = [
-        str(row.get("addrSido") or "").strip(),
-        str(row.get("addrSigungu") or "").strip(),
-        str(row.get("addrDong") or "").strip(),
-        str(row.get("addrRoad") or "").strip(),
-        str(row.get("addrDetail") or "").strip(),
-    ]
-    joined = " ".join(p for p in parts if p)
-    return joined or None
+    text = str(value).strip()
+    if not text:
+        return None
+    text = text.replace(".", "-").replace("/", "-")
+    for fmt in (
+        "%Y-%m-%dT%H:%M:%S.%f",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S.%f",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d",
+    ):
+        try:
+            return datetime.strptime(text[:26], fmt).isoformat()
+        except ValueError:
+            continue
+    return _parse_date(text)
 
 
-def _organization(row: dict[str, Any]) -> str | None:
-    for key in ("group", "group1", "group2", "mission", "mission1"):
-        val = row.get(key)
-        if val:
-            return str(val).strip()
+def normalize_children_group(value: str | None) -> str | None:
+    """유년1부-2학년-01반, '03.유년 - 유년1부 - 2학년 - 05반' → '1-2-1'."""
+    if not value:
+        return None
+    dept = re.search(r"유년\s*(\d+)\s*부", value)
+    grade = re.search(r"(\d+)\s*학년", value)
+    klass = re.search(r"(\d+)\s*반", value)
+    if not (dept and grade and klass):
+        return None
+    return f"{int(dept.group(1))}-{int(grade.group(1))}-{int(klass.group(1))}"
+
+
+def _first_text(row: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        text = _as_text(row.get(key))
+        if text:
+            return text
     return None
 
 
 def map_person_row(row: dict[str, Any]) -> dict[str, Any] | None:
-    name = str(row.get("name") or "").strip()
-    if not name:
+    """디모데 person/list 응답을 엑셀 컬럼 기준 srnch_members 레코드로 변환."""
+    member_id = _as_int(row.get("id"))
+    name = _as_text(row.get("name"))
+    if member_id is None or not name:
         return None
+
+    children_group = _first_text(row, "group", "group1", "group2", "mission", "mission1")
+    jibeon_address = _first_text(row, "addrDongAddr", "addrRoadAddr")
+    if not jibeon_address:
+        parts = [
+            _as_text(row.get("addrSido")) or "",
+            _as_text(row.get("addrSigungu")) or "",
+            _as_text(row.get("addrDong")) or "",
+            _as_text(row.get("addrDetail")) or "",
+        ]
+        jibeon_address = " ".join(p for p in parts if p) or None
+
     return {
+        "id": member_id,
         "name": name,
-        "gender": (str(row.get("gender")).strip() if row.get("gender") else None),
-        "organization": _organization(row),
-        "birth_date": _parse_birth_date(row.get("birthDate")),
-        "mobile": (str(row.get("mobileNum")).strip() if row.get("mobileNum") else None),
-        "household_head": (str(row.get("core")).strip() if row.get("core") else None),
-        "relationship_to_head": (
-            str(row.get("coreRelative")).strip() if row.get("coreRelative") else None
-        ),
-        "address": _compose_address(row),
+        "name_distinct": _as_text(row.get("nameDistinct")),
+        "children_group": children_group,
+        "children_group_div": normalize_children_group(children_group),
+        "member_type1": _first_text(row, "state1", "status"),
+        "member_type2": _as_text(row.get("state2")),
+        "birth_date": _parse_date(row.get("birthDate")),
+        "age": _as_int(row.get("age")),
+        "mobile": _as_text(row.get("mobileNum")),
+        "gender": _as_text(row.get("gender")),
+        "spouse_duty": _first_text(row, "partnerDuty1", "partnerdutyIid"),
+        "household_head": _as_text(row.get("core")),
+        "relationship_to_head": _as_text(row.get("coreRelative")),
+        "jibeon_address": jibeon_address,
+        "duty1": _as_text(row.get("duty1")),
+        "duty2": _as_text(row.get("duty2")),
+        "family": _as_text(row.get("family")),
+        "registered_at": _parse_timestamptz(row.get("regDate")),
+        "last_updated_at": _parse_timestamptz(row.get("updateDate")),
+        "last_visit_at": _parse_date(row.get("lastVisitDate")),
+        "last_attendance_at": _parse_date(row.get("lastAttDate")),
+        "last_offering_at": _parse_date(row.get("lastOfferDate")),
+        "welcome_at": _parse_date(row.get("welcomeDate")),
+        "spouse_mobile": _as_text(row.get("partnerMobileNum")),
+        "leader1": _as_text(row.get("leader1")),
+        "leader1_duty1": _first_text(row, "leader1Duty1", "leader1Duty"),
+        "leader1_duty2": _as_text(row.get("leader1Duty2")),
+        "leader1_mobile": _first_text(row, "leader1MobileNum", "leader1Mobile"),
+        "leader1_children_group": _first_text(row, "leader1Group", "leader1ChildrenGroup"),
+        "leader2": _as_text(row.get("leader2")),
+        "leader2_duty1": _first_text(row, "leader2Duty1", "leader2Duty"),
+        "leader2_duty2": _as_text(row.get("leader2Duty2")),
+        "leader2_mobile": _first_text(row, "leader2MobileNum", "leader2Mobile"),
+        "leader2_children_group": _first_text(row, "leader2Group", "leader2ChildrenGroup"),
     }
 
 
@@ -179,7 +285,6 @@ class DimodeClient:
         )
         members_page.raise_for_status()
 
-        # year 파라미터에서 baseYear 추출, 없으면 현재 URL 쿼리/기본값
         year_match = re.search(r"[?&]year=(\d{4})", self.members_url)
         base_year = year_match.group(1) if year_match else "2026"
 
@@ -260,12 +365,14 @@ class DimodeClient:
 
 
 def upsert_members(client: Client, members: list[dict[str, Any]]) -> int:
-    client.table("srnch_members").delete().neq("name", "").execute()
-    batch_size = 200
+    # 전체 동기화: 기존 데이터 삭제 후 재적재
+    client.table("srnch_members").delete().gte("id", 0).execute()
+
+    batch_size = 100
     inserted = 0
     for i in range(0, len(members), batch_size):
-        chunk = members[i : i + batch_size]
-        client.table("srnch_members").insert(chunk).execute()
+        chunk = [{k: row.get(k) for k in MEMBER_FIELDS} for row in members[i : i + batch_size]]
+        client.table("srnch_members").upsert(chunk, on_conflict="id").execute()
         inserted += len(chunk)
     return inserted
 
@@ -303,24 +410,8 @@ def render() -> None:
             missing.append(key)
 
     if missing:
-        st.error("다음 secrets 변수가 필요합니다: " + ", ".join(missing))
-        st.code(
-            "\n".join(
-                [
-                    'SUPABASE_PROJECT = "your-project-ref"',
-                    'SUPABASE_KEY = "your-service-role-key"',
-                    'W_DIMODE_URL = "https://w.dimode.co.kr/srnch"',
-                    'W_DIMODE_ID = "your-id"',
-                    'W_DIMODE_PW = "your-password"',
-                    'W_DIMODE_URL_MEMBERS = "https://w.dimode.co.kr/srnch/member/?year=2026&lang=ko#/person/list"',
-                ]
-            ),
-            language="toml",
-        )
+        st.error("다음 Streamlit secrets 변수가 필요합니다: " + ", ".join(missing))
         return
-
-    host = urlparse(_secret("W_DIMODE_URL")).netloc or _secret("W_DIMODE_URL")
-    st.write(f"대상: `{host}` / site=`{_site_root(_secret('W_DIMODE_URL'))}`")
 
     if st.button("회원 동기화 실행", type="primary"):
         with st.spinner("로그인 및 회원 수집 중..."):

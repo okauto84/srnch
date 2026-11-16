@@ -28,14 +28,44 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+
+def _admin_password_ok() -> bool:
+    """ADMIN_PW와 입력값이 일치하면 관리 화면 접근을 허용한다."""
+    if st.session_state.get("admin_unlocked"):
+        return True
+
+    try:
+        expected = str(st.secrets["ADMIN_PW"]).strip()
+    except Exception:  # noqa: BLE001
+        st.error("secrets에 ADMIN_PW가 필요합니다.")
+        return False
+
+    if not expected:
+        st.error("secrets의 ADMIN_PW 값이 비어 있습니다.")
+        return False
+
+    entered = st.text_input(
+        "관리자 비밀번호",
+        type="password",
+        key="admin_pw_input",
+    )
+    if st.button("확인", key="admin_pw_submit"):
+        if entered == expected:
+            st.session_state["admin_unlocked"] = True
+            st.rerun()
+        st.error("비밀번호가 올바르지 않습니다.")
+    return False
+
+
 # 상단 메뉴바: 왼쪽 제목
 st.markdown("### 새꿈이")
 
 # 메뉴 탭 + 하단 콘텐츠 영역
-tab_list, tab_temp = st.tabs(["목록", "임시"])
+tab_list, tab_admin = st.tabs(["목록", "ADMIN"])
 
 with tab_list:
     tab10_list.render()
 
-with tab_temp:
-    tab90_admin.render()
+with tab_admin:
+    if _admin_password_ok():
+        tab90_admin.render()
