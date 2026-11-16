@@ -90,16 +90,25 @@ def _fetch_members(url: str, key: str) -> list[dict]:
         create_client(url, key)
         .table("srnch_members")
         .select(columns)
-        .order("name")
-        .order("id")
+        .order("children_group", nullsfirst=False)
+        .order("name", nullsfirst=False)
         .limit(2000)
         .execute()
     )
-    return response.data or []
+    rows = response.data or []
+    rows.sort(key=_grid_sort_key)
+    return rows
+
+
+def _grid_sort_key(row: dict) -> tuple:
+    """어린이 조직, 이름 오름차순. 조직이 비어 있으면 뒤로 보낸다."""
+    group = str(row.get("children_group") or "").strip()
+    name = str(row.get("name") or "").strip()
+    return (group == "", group, name)
 
 
 def _load_indexed() -> list[dict]:
-    """그리드와 같은 정렬(이름, id)로 전체 회원을 읽는다."""
+    """그리드와 같은 정렬(어린이 조직, 이름)로 전체 회원을 읽는다."""
     return _fetch_members(_supabase_url(_secret("SUPABASE_PROJECT")), _secret("SUPABASE_KEY"))
 
 
