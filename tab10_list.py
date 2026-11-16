@@ -325,12 +325,12 @@ def _render_chat(members: list[dict]) -> None:
                 """
                 <div class="member-chat-wait" role="status">
                     <span class="member-chat-wait-spin" aria-hidden="true"></span>
-                    <span>답변을 작성하고 있습니다. 잠시만 기다려 주세요.</span>
+                    <span>답변을 작성 중...</span>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
-            with st.spinner("답변을 작성하고 있습니다. 잠시만 기다려 주세요.", show_time=True):
+            with st.spinner("답변을 작성 중...", show_time=True):
                 try:
                     answer = _ask_openai(api_key, members, st.session_state.member_messages)
                 except Exception as exc:  # noqa: BLE001
