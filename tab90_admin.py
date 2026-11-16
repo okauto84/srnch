@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import date, datetime
 from typing import Any
@@ -157,6 +158,30 @@ def _parse_timestamptz(value: Any) -> str | None:
     return _parse_date(text)
 
 
+def _children_group_category(app_js: str) -> str:
+    """appJs에서 '어린이' 조직 카테고리 코드(예: extended2)를 읽는다."""
+    marker = "global.data.group.category = JSON.parse('"
+    start = app_js.find(marker)
+    if start >= 0:
+        start += len(marker)
+        end = app_js.find("');", start)
+        raw = app_js[start:end] if end > start else ""
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            data = {}
+        for item in data.get("list") or []:
+            if item.get("title") == "어린이" and item.get("name"):
+                return str(item["name"])
+        own = (data.get("names") or {}).get("own") or []
+        if own:
+            return str(own[0])
+    own_match = re.search(r'"own":\["([^"]+)"\]', app_js)
+    if own_match:
+        return own_match.group(1)
+    return "extended2"
+
+
 def normalize_children_group(value: str | None) -> str | None:
     """유년1부-2학년-01반, '03.유년 - 유년1부 - 2학년 - 05반' → '1-2-1'."""
     if not value:
@@ -243,6 +268,7 @@ class DimodeClient:
         self.password = password
         self.members_url = members_url
         self.signal = ""
+        self.group_category = "extended2"
         self.session = requests.Session()
         self.session.verify = False
         self.session.headers.update(
@@ -308,6 +334,7 @@ class DimodeClient:
         if not match:
             raise RuntimeError("appJs에서 Signal 값을 찾지 못했습니다.")
         self.signal = match.group(1)
+        self.group_category = _children_group_category(app_js.text)
 
     def fetch_members(self) -> list[dict[str, Any]]:
         self._load_signal()
@@ -327,7 +354,7 @@ class DimodeClient:
                     "baseYear": base_year,
                     "program": "member",
                     "log": "false",
-                    "groupCategory": "",
+                    "groupCategory": self.group_category,
                     "skip": skip,
                     "take": take,
                 },
