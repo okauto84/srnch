@@ -25,8 +25,6 @@ VISIBLE_COLUMNS: tuple[tuple[str, str], ...] = (
     ("household_head", "세대주"),
     ("jibeon_address", "지번주소"),
 )
-MEMBER_COLUMNS = tuple(column for column, _label in VISIBLE_COLUMNS if column != "teacher_name")
-
 PRE_PROMPT = """# 역할
 저는 어린이를 교육하는 교사로써, 학생 명단을 보고 한국어로 답변하는 선생님.
 
@@ -39,17 +37,13 @@ PRE_PROMPT = """# 역할
 - 여러 명이면 그 형식으로 나열한다.
 
 # 필드
-- 이름: 회원 이름
-- 구분: 동명이인을 나누는 한 글자. 없으면 빈 문자열
-- 어린이 조직 div: `1-2-5`처럼 부-학년-반을 숫자로 줄인 값
-- 성별: 남 또는 여
-- 어린이 조직: "03.유년 - 유년1부 - 2학년 - 05반" 형태의 조직 경로
-- 담임 선생님: 해당 연도·조직의 담임 이름
-- 생년월일: YYYY-MM-DD
-- 나이: 정수
-- 휴대전화: 전화번호 문자열
-- 세대주: 세대주 이름
-- 지번주소: 지번 주소
+- members 각 행은 srnch_members의 모든 컬럼을 포함한다.
+- year, children_group_div 기준으로 조인한 srnch_teacher 행은 teachers 배열에 모두 넣는다.
+- teacher_name은 조인된 담임 이름을 이어 붙인 표시용 값이다.
+- name: 회원 이름
+- name_distinct: 동명이인 구분 한 글자. 없으면 빈 문자열
+- children_group_div: `1-2-5`처럼 부-학년-반을 숫자로 줄인 값
+- children_group: "03.유년 - 유년1부 - 2학년 - 05반" 형태의 조직 경로
 
 # members
 {members}
@@ -87,47 +81,55 @@ def _supabase_url(project: str) -> str:
     return f"https://{project}.supabase.co"
 
 
-def _teacher_map(client, year: int) -> dict[str, str]:
-    """year, children_group_div 기준 담임 이름. 같은 반에 여럿이면 쉼표로 이어 붙인다."""
+def _teachers_by_group(client, year: int) -> dict[str, list[dict]]:
+    """year, children_group_div 기준 srnch_teacher 전체 행."""
     response = (
         client.table("srnch_teacher")
-        .select("children_group_div,teacher_name")
+        .select("*")
         .eq("year", year)
         .limit(2000)
         .execute()
     )
-    grouped: dict[str, list[str]] = {}
+    grouped: dict[str, list[dict]] = {}
     for row in response.data or []:
         group_div = str(row.get("children_group_div") or "").strip()
-        teacher_name = str(row.get("teacher_name") or "").strip()
-        if not group_div or not teacher_name:
+        if not group_div:
             continue
-        grouped.setdefault(group_div, []).append(teacher_name)
-    return {
-        group_div: ", ".join(sorted(set(names)))
-        for group_div, names in grouped.items()
-    }
+        grouped.setdefault(group_div, []).append(row)
+    return grouped
+
+
+def _teacher_display_name(teachers: list[dict]) -> str:
+    names = sorted(
+        {
+            str(row.get("teacher_name") or "").strip()
+            for row in teachers
+            if str(row.get("teacher_name") or "").strip()
+        }
+    )
+    return ", ".join(names)
 
 
 @st.cache_data(ttl=30, show_spinner=False)
 def _fetch_members(url: str, key: str, year: int) -> list[dict]:
-    """회원을 연도로 읽고, 담임은 year·children_group_div로 붙인다."""
+    """srnch_members 전체와, year·children_group_div로 조인한 srnch_teacher 전체를 붙인다."""
     client = create_client(url, key)
-    columns = "id,children_group_div,year," + ",".join(MEMBER_COLUMNS)
     response = (
         client.table("srnch_members")
-        .select(columns)
+        .select("*")
         .eq("year", year)
         .order("children_group", nullsfirst=False)
         .order("name", nullsfirst=False)
         .limit(2000)
         .execute()
     )
-    teachers = _teacher_map(client, year)
+    teachers_by_group = _teachers_by_group(client, year)
     rows = response.data or []
     for row in rows:
         group_div = str(row.get("children_group_div") or "").strip()
-        row["teacher_name"] = teachers.get(group_div, "")
+        teachers = teachers_by_group.get(group_div, [])
+        row["teachers"] = teachers
+        row["teacher_name"] = _teacher_display_name(teachers)
     rows.sort(key=_grid_sort_key)
     return rows
 
@@ -234,13 +236,12 @@ def _format_member_mentions(text: str, members: list[dict]) -> str:
 
 
 def _prompt_rows(rows: list[dict]) -> list[dict]:
-    prompt_columns = VISIBLE_COLUMNS + (("children_group_div", "어린이 조직 div"),)
+    """그리드/챗봇용 members에 srnch_members·srnch_teacher 조인 결과를 모두 넣는다."""
     payload: list[dict] = []
     for row in rows:
         item = {}
-        for key, label in prompt_columns:
-            value = row.get(key)
-            item[label] = "" if value is None else value
+        for key, value in row.items():
+            item[key] = "" if value is None else value
         payload.append(item)
     return payload
 
