@@ -10,6 +10,7 @@ from supabase import create_client
 
 VISIBLE_ROWS = 10
 GRID_ROW_HEIGHT = 35
+YEAR_OPTIONS = (2026, 2027)
 
 # 화면 컬럼 순서. 키는 DB 컬럼, 값은 표시명.
 VISIBLE_COLUMNS: tuple[tuple[str, str], ...] = (
@@ -17,12 +18,14 @@ VISIBLE_COLUMNS: tuple[tuple[str, str], ...] = (
     ("name_distinct", "구분"),
     ("gender", "성별"),
     ("children_group", "어린이 조직"),
+    ("teacher_name", "담임 선생님"),
     ("birth_date", "생년월일"),
     ("age", "나이"),
     ("mobile", "휴대전화"),
     ("household_head", "세대주"),
     ("jibeon_address", "지번주소"),
 )
+MEMBER_COLUMNS = tuple(column for column, _label in VISIBLE_COLUMNS if column != "teacher_name")
 
 PRE_PROMPT = """# 역할
 저는 어린이를 교육하는 교사로써, 학생 명단을 보고 한국어로 답변하는 선생님.
@@ -41,6 +44,7 @@ PRE_PROMPT = """# 역할
 - 어린이 조직 div: `1-2-5`처럼 부-학년-반을 숫자로 줄인 값
 - 성별: 남 또는 여
 - 어린이 조직: "03.유년 - 유년1부 - 2학년 - 05반" 형태의 조직 경로
+- 담임 선생님: 해당 연도·조직의 담임 이름
 - 생년월일: YYYY-MM-DD
 - 나이: 정수
 - 휴대전화: 전화번호 문자열
@@ -56,6 +60,7 @@ COLUMN_WIDTHS = {
     "구분": 48,
     "성별": 48,
     "어린이 조직": 240,
+    "담임 선생님": 90,
     "생년월일": 110,
     "나이": 48,
     "휴대전화": 130,
@@ -82,20 +87,47 @@ def _supabase_url(project: str) -> str:
     return f"https://{project}.supabase.co"
 
 
-@st.cache_data(ttl=30, show_spinner=False)
-def _fetch_members(url: str, key: str) -> list[dict]:
-    """회원 목록을 잠시 보관한다."""
-    columns = "id,children_group_div," + ",".join(column for column, _label in VISIBLE_COLUMNS)
+def _teacher_map(client, year: int) -> dict[str, str]:
+    """year, children_group_div 기준 담임 이름. 같은 반에 여럿이면 쉼표로 이어 붙인다."""
     response = (
-        create_client(url, key)
-        .table("srnch_members")
+        client.table("srnch_teacher")
+        .select("children_group_div,teacher_name")
+        .eq("year", year)
+        .limit(2000)
+        .execute()
+    )
+    grouped: dict[str, list[str]] = {}
+    for row in response.data or []:
+        group_div = str(row.get("children_group_div") or "").strip()
+        teacher_name = str(row.get("teacher_name") or "").strip()
+        if not group_div or not teacher_name:
+            continue
+        grouped.setdefault(group_div, []).append(teacher_name)
+    return {
+        group_div: ", ".join(sorted(set(names)))
+        for group_div, names in grouped.items()
+    }
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _fetch_members(url: str, key: str, year: int) -> list[dict]:
+    """회원을 연도로 읽고, 담임은 year·children_group_div로 붙인다."""
+    client = create_client(url, key)
+    columns = "id,children_group_div,year," + ",".join(MEMBER_COLUMNS)
+    response = (
+        client.table("srnch_members")
         .select(columns)
+        .eq("year", year)
         .order("children_group", nullsfirst=False)
         .order("name", nullsfirst=False)
         .limit(2000)
         .execute()
     )
+    teachers = _teacher_map(client, year)
     rows = response.data or []
+    for row in rows:
+        group_div = str(row.get("children_group_div") or "").strip()
+        row["teacher_name"] = teachers.get(group_div, "")
     rows.sort(key=_grid_sort_key)
     return rows
 
@@ -107,9 +139,13 @@ def _grid_sort_key(row: dict) -> tuple:
     return (group == "", group, name)
 
 
-def _load_indexed() -> list[dict]:
-    """그리드와 같은 정렬(어린이 조직, 이름)로 전체 회원을 읽는다."""
-    return _fetch_members(_supabase_url(_secret("SUPABASE_PROJECT")), _secret("SUPABASE_KEY"))
+def _load_indexed(year: int) -> list[dict]:
+    """그리드와 같은 정렬(어린이 조직, 이름)로 해당 연도 회원을 읽는다."""
+    return _fetch_members(
+        _supabase_url(_secret("SUPABASE_PROJECT")),
+        _secret("SUPABASE_KEY"),
+        year,
+    )
 
 
 def _member_label(member: dict) -> str:
@@ -328,15 +364,21 @@ def render() -> None:
         unsafe_allow_html=True,
     )
 
+    if st.session_state.get("member_list_year") not in YEAR_OPTIONS:
+        st.session_state["member_list_year"] = YEAR_OPTIONS[0]
+    year_col, _ = st.columns([1, 5])
+    with year_col:
+        selected_year = st.selectbox("연도", options=list(YEAR_OPTIONS), key="member_list_year")
+
     try:
-        indexed = _load_indexed()
+        indexed = _load_indexed(int(selected_year))
     except Exception as exc:  # noqa: BLE001
         st.error(f"회원 목록을 불러오지 못했습니다: {exc}")
         return
 
     st.caption(f"총 {len(indexed)}건")
     if not indexed:
-        st.info("표시할 회원이 없습니다.")
+        st.info(f"{selected_year}년 표시할 회원이 없습니다.")
         _render_chat(indexed)
         return
 
