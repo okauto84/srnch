@@ -123,6 +123,21 @@ def _update_teacher(
         raise LookupError("선택한 담임 정보를 찾지 못했습니다.")
 
 
+def _delete_teacher(year: int, children_group_div: str, teacher_name: str) -> None:
+    """연도·조직·이름이 같은 담임 행을 지운다."""
+    response = (
+        _client()
+        .table("srnch_teacher")
+        .delete()
+        .eq("year", year)
+        .eq("children_group_div", children_group_div)
+        .eq("teacher_name", teacher_name)
+        .execute()
+    )
+    if response.data is not None and not response.data:
+        raise LookupError("삭제할 담임 정보를 찾지 못했습니다.")
+
+
 @st.cache_data(ttl=30, show_spinner=False)
 def _fetch_teachers(year: int, _version: int) -> list[dict]:
     response = (
@@ -225,9 +240,6 @@ def _handle_save(
         return None
 
     _remember_saved(year, group_text, name_text)
-    st.session_state["teacher_data_version"] = int(st.session_state.get("teacher_data_version", 0)) + 1
-    if year in YEAR_OPTIONS:
-        st.session_state["teacher_list_year"] = year
     return year
 
 
@@ -240,17 +252,83 @@ _INPUT_KEYS = (
 )
 
 
+def _clear_form() -> None:
+    """입력 칸과 선택 상태를 비운다."""
+    for key in _INPUT_KEYS:
+        st.session_state[key] = ""
+    st.session_state.pop("teacher_edit_key", None)
+    st.session_state.pop("teacher_loaded_sig", None)
+    st.session_state.pop("teacher_pending_fill", None)
+    st.session_state["teacher_grid_generation"] = (
+        int(st.session_state.get("teacher_grid_generation", 0)) + 1
+    )
+
+
+def _bump_list(year: int | None = None) -> None:
+    st.session_state["teacher_data_version"] = int(st.session_state.get("teacher_data_version", 0)) + 1
+    st.session_state["teacher_grid_generation"] = (
+        int(st.session_state.get("teacher_grid_generation", 0)) + 1
+    )
+    if year is not None and year in YEAR_OPTIONS:
+        st.session_state["teacher_list_year"] = year
+
+
+def _parse_teacher_key(
+    year_text: str, group_text: str, name_text: str
+) -> tuple[int, str, str] | None:
+    year_text = year_text.strip()
+    group_text = group_text.strip()
+    name_text = name_text.strip()
+    missing = [
+        label
+        for label, value in (("연도", year_text), ("조직", group_text), ("이름", name_text))
+        if not value
+    ]
+    if missing:
+        _alert("빈칸이 있습니다: " + ", ".join(missing))
+        return None
+    try:
+        year = int(year_text)
+    except ValueError:
+        _alert("연도는 숫자로 입력하세요.")
+        return None
+    if not 2000 <= year <= 2100:
+        _alert("연도는 2000년부터 2100년까지 입력하세요.")
+        return None
+    if not GROUP_DIV_RE.fullmatch(group_text):
+        _alert("조직은 1-1-5 형식으로 입력하세요.")
+        return None
+    return year, group_text, name_text
+
+
+def _handle_delete(year_text: str, group_text: str, name_text: str) -> bool:
+    """선택한 행이 있으면 그 행을, 없으면 입력 칸의 키로 삭제한다."""
+    edit_key = st.session_state.get("teacher_edit_key")
+    if edit_key:
+        year = int(edit_key["year"])
+        group = str(edit_key["children_group_div"])
+        name = str(edit_key["teacher_name"])
+    else:
+        parsed = _parse_teacher_key(year_text, group_text, name_text)
+        if parsed is None:
+            return False
+        year, group, name = parsed
+
+    try:
+        _delete_teacher(year, group, name)
+    except Exception as exc:  # noqa: BLE001
+        _alert(f"삭제하지 못했습니다: {exc}")
+        return False
+
+    st.session_state["teacher_clear_requested"] = True
+    _bump_list(year)
+    return True
+
+
 def _apply_form_overrides() -> None:
-    """선택 행이나 새로 입력을 위젯이 그려지기 전에 반영한다."""
+    """선택 행을 위젯이 그려지기 전에 입력 칸에 반영한다."""
     if st.session_state.pop("teacher_clear_requested", False):
-        for key in _INPUT_KEYS:
-            st.session_state[key] = ""
-        st.session_state.pop("teacher_edit_key", None)
-        st.session_state.pop("teacher_loaded_sig", None)
-        st.session_state.pop("teacher_pending_fill", None)
-        st.session_state["teacher_grid_generation"] = (
-            int(st.session_state.get("teacher_grid_generation", 0)) + 1
-        )
+        _clear_form()
         return
 
     fill = st.session_state.pop("teacher_pending_fill", None)
@@ -306,28 +384,31 @@ def render() -> None:
     with col_phone:
         phone_text = st.text_input("연락처", key="teacher_input_phone")
 
-    col_address, col_new, col_save = st.columns([4.2, 0.95, 0.7], vertical_alignment="bottom")
+    col_address, col_save, col_delete = st.columns(
+        [4.2, 0.7, 0.7], vertical_alignment="bottom"
+    )
     with col_address:
         address_text = st.text_input("주소", key="teacher_input_address")
-    with col_new:
-        clear_clicked = st.button("새로 입력", use_container_width=True, key="teacher_new_btn")
     with col_save:
         submitted = st.button("저장", use_container_width=True, key="teacher_save_btn")
-
-    if clear_clicked:
-        st.session_state["teacher_clear_requested"] = True
-        st.rerun()
+    with col_delete:
+        deleted = st.button("삭제", use_container_width=True, key="teacher_delete_btn")
 
     if submitted:
         saved = _handle_save(year_text, group_text, name_text, phone_text, address_text)
         if saved is not None:
             st.session_state["teacher_saved_msg"] = True
-            st.session_state["teacher_grid_generation"] = (
-                int(st.session_state.get("teacher_grid_generation", 0)) + 1
-            )
+            _bump_list(saved)
+
+    if deleted:
+        if _handle_delete(year_text, group_text, name_text):
+            st.session_state["teacher_deleted_msg"] = True
+            st.rerun()
 
     if st.session_state.pop("teacher_saved_msg", False):
         st.success("저장했습니다.")
+    if st.session_state.pop("teacher_deleted_msg", False):
+        st.success("삭제했습니다.")
 
     version = int(st.session_state.get("teacher_data_version", 0))
     if st.session_state.get("teacher_list_year") not in YEAR_OPTIONS:
@@ -352,7 +433,7 @@ def render() -> None:
         return
 
     labels = [label for _key, label in GRID_COLUMNS]
-    st.caption("행을 선택하면 입력 칸에 넣습니다. 수정 후 저장하면 그 행에 반영됩니다.")
+    st.caption("행을 선택하면 입력 칸에 넣습니다. 저장은 신규·수정, 삭제는 선택한 행을 지웁니다.")
     generation = int(st.session_state.get("teacher_grid_generation", 0))
     selected = st.dataframe(
         _to_display_rows(rows),
