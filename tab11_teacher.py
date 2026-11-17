@@ -44,19 +44,76 @@ def _supabase_url(project: str) -> str:
     return f"https://{project}.supabase.co"
 
 
+# srnch_teacher 기본 키. 이 세 값이 모두 맞을 때만 한 행을 고치거나 지운다.
+TEACHER_KEY_FIELDS = ("year", "teacher_name", "children_group_div")
+TEACHER_KEY_SELECT = "year,teacher_name,children_group_div"
+
+
 def _client():
     return create_client(_supabase_url(_secret("SUPABASE_PROJECT")), _secret("SUPABASE_KEY"))
 
 
-def _teacher_exists(year: int, children_group_div: str, teacher_name: str) -> bool:
-    """같은 연도·조직·이름 행이 이미 있는지 확인한다."""
+def _make_teacher_key(year: int, teacher_name: str, children_group_div: str) -> dict:
+    """기본 키를 정규화한다. 하나라도 비면 거부한다."""
+    name = str(teacher_name).strip()
+    group = str(children_group_div).strip()
+    if not isinstance(year, int):
+        year = int(year)
+    if not name or not group:
+        raise ValueError("담임 키(year, teacher_name, children_group_div)가 완전하지 않습니다.")
+    if not GROUP_DIV_RE.fullmatch(group):
+        raise ValueError("조직은 1-1-5 형식으로 입력하세요.")
+    return {
+        "year": year,
+        "teacher_name": name,
+        "children_group_div": group,
+    }
+
+
+def _as_teacher_key(raw: dict | None) -> dict:
+    """세션/선택 값에서 기본 키만 뽑아 검증한다."""
+    if not raw:
+        raise ValueError("담임 키가 없습니다.")
+    missing = [field for field in TEACHER_KEY_FIELDS if raw.get(field) in (None, "")]
+    if missing:
+        raise ValueError(
+            "담임 키가 완전하지 않습니다: " + ", ".join(missing)
+        )
+    return _make_teacher_key(
+        int(raw["year"]),
+        str(raw["teacher_name"]),
+        str(raw["children_group_div"]),
+    )
+
+
+def _filter_by_teacher_key(query, key: dict):
+    """세 키 조건이 모두 있을 때만 필터한다. 다른 행이 걸리지 않게 한다."""
+    key = _as_teacher_key(key)
+    return (
+        query.eq("year", key["year"])
+        .eq("teacher_name", key["teacher_name"])
+        .eq("children_group_div", key["children_group_div"])
+    )
+
+
+def _require_one_row(rows: list | None, action: str) -> dict:
+    if not rows:
+        raise LookupError(f"{action}할 담임 정보를 찾지 못했습니다.")
+    if len(rows) != 1:
+        raise RuntimeError(
+            f"{action} 대상이 {len(rows)}건입니다. "
+            "year, teacher_name, children_group_div 키가 한 행만 가리켜야 합니다."
+        )
+    return rows[0]
+
+
+def _teacher_exists(key: dict) -> bool:
+    """같은 기본 키 행이 이미 있는지 확인한다."""
     response = (
-        _client()
-        .table("srnch_teacher")
-        .select("year")
-        .eq("year", year)
-        .eq("children_group_div", children_group_div)
-        .eq("teacher_name", teacher_name)
+        _filter_by_teacher_key(
+            _client().table("srnch_teacher").select("year"),
+            key,
+        )
         .limit(1)
         .execute()
     )
@@ -75,10 +132,9 @@ def _teacher_payload(
     phone: str,
     address: str,
 ) -> dict:
+    key = _make_teacher_key(year, teacher_name, children_group_div)
     return {
-        "year": year,
-        "teacher_name": teacher_name,
-        "children_group_div": children_group_div,
+        **key,
         "phone": phone or None,
         "address": address or None,
     }
@@ -107,35 +163,35 @@ def _update_teacher(
     phone: str,
     address: str,
 ) -> None:
-    """선택한 행의 연도·조직·이름·연락처·주소를 고친다."""
-    payload = _teacher_payload(year, children_group_div, teacher_name, phone, address)
-    payload["updated_at"] = _today()
-    response = (
-        _client()
-        .table("srnch_teacher")
-        .update(payload)
-        .eq("year", int(edit_key["year"]))
-        .eq("children_group_div", edit_key["children_group_div"])
-        .eq("teacher_name", edit_key["teacher_name"])
-        .execute()
-    )
-    if response.data is not None and not response.data:
-        raise LookupError("선택한 담임 정보를 찾지 못했습니다.")
+    """선택한 행만, 기본 키 세 조건으로 고친다."""
+    old_key = _as_teacher_key(edit_key)
+    new_key = _make_teacher_key(year, teacher_name, children_group_div)
+    if old_key == new_key:
+        # 키가 같으면 연락처·주소만 바꿔 다른 행 키를 건드리지 않는다.
+        payload = {
+            "phone": phone or None,
+            "address": address or None,
+            "updated_at": _today(),
+        }
+    else:
+        payload = _teacher_payload(year, children_group_div, teacher_name, phone, address)
+        payload["updated_at"] = _today()
+
+    response = _filter_by_teacher_key(
+        _client().table("srnch_teacher").update(payload),
+        old_key,
+    ).select(TEACHER_KEY_SELECT).execute()
+    _require_one_row(response.data, "수정")
 
 
-def _delete_teacher(year: int, children_group_div: str, teacher_name: str) -> None:
-    """연도·조직·이름이 같은 담임 행을 지운다."""
-    response = (
-        _client()
-        .table("srnch_teacher")
-        .delete()
-        .eq("year", year)
-        .eq("children_group_div", children_group_div)
-        .eq("teacher_name", teacher_name)
-        .execute()
-    )
-    if response.data is not None and not response.data:
-        raise LookupError("삭제할 담임 정보를 찾지 못했습니다.")
+def _delete_teacher(key: dict) -> None:
+    """기본 키 세 조건이 모두 같은 한 행만 지운다."""
+    key = _as_teacher_key(key)
+    response = _filter_by_teacher_key(
+        _client().table("srnch_teacher").delete(),
+        key,
+    ).select(TEACHER_KEY_SELECT).execute()
+    _require_one_row(response.data, "삭제")
 
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -168,24 +224,24 @@ def _alert(message: str) -> None:
     st.toast(message, icon="⚠️")
 
 
-def _same_teacher(edit_key: dict | None, year: int, group_text: str, name_text: str) -> bool:
+def _same_teacher(edit_key: dict | None, key: dict) -> bool:
     if not edit_key:
         return False
-    return (
-        int(edit_key["year"]) == year
-        and edit_key["children_group_div"] == group_text
-        and edit_key["teacher_name"] == name_text
-    )
+    try:
+        return _as_teacher_key(edit_key) == _as_teacher_key(key)
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
-def _remember_saved(year: int, group_text: str, name_text: str) -> None:
+def _remember_saved(key: dict) -> None:
     """방금 저장한 행을 이어서 고칠 수 있게 둔다."""
-    st.session_state["teacher_edit_key"] = {
-        "year": year,
-        "children_group_div": group_text,
-        "teacher_name": name_text,
-    }
-    st.session_state["teacher_loaded_sig"] = (str(year), group_text, name_text)
+    key = _as_teacher_key(key)
+    st.session_state["teacher_edit_key"] = key
+    st.session_state["teacher_loaded_sig"] = (
+        str(key["year"]),
+        key["children_group_div"],
+        key["teacher_name"],
+    )
 
 
 def _handle_save(
@@ -195,52 +251,52 @@ def _handle_save(
     phone_text: str,
     address_text: str,
 ) -> int | None:
-    year_text = year_text.strip()
-    group_text = group_text.strip()
-    name_text = name_text.strip()
     phone_text = phone_text.strip()
     address_text = address_text.strip()
-    missing = [
-        label
-        for label, value in (("연도", year_text), ("조직", group_text), ("이름", name_text))
-        if not value
-    ]
-    if missing:
-        _alert("빈칸이 있습니다: " + ", ".join(missing))
+    parsed = _parse_teacher_key(year_text, group_text, name_text)
+    if parsed is None:
         return None
+    year, group_text, name_text = parsed
+    new_key = _make_teacher_key(year, name_text, group_text)
 
+    edit_raw = st.session_state.get("teacher_edit_key")
     try:
-        year = int(year_text)
-    except ValueError:
-        _alert("연도는 숫자로 입력하세요.")
-        return None
-    if not 2000 <= year <= 2100:
-        _alert("연도는 2000년부터 2100년까지 입력하세요.")
-        return None
-    if not GROUP_DIV_RE.fullmatch(group_text):
-        _alert("조직은 1-1-5 형식으로 입력하세요.")
-        return None
-
-    edit_key = st.session_state.get("teacher_edit_key")
-    try:
-        if edit_key:
-            if not _same_teacher(edit_key, year, group_text, name_text) and _teacher_exists(
-                year, group_text, name_text
-            ):
-                _alert(f"이미 같은 데이터가 있습니다: {year} / {group_text} / {name_text}")
+        if edit_raw:
+            edit_key = _as_teacher_key(edit_raw)
+            if not _same_teacher(edit_key, new_key) and _teacher_exists(new_key):
+                _alert(
+                    "이미 같은 데이터가 있습니다: "
+                    f"{new_key['year']} / {new_key['children_group_div']} / {new_key['teacher_name']}"
+                )
                 return None
-            _update_teacher(edit_key, year, group_text, name_text, phone_text, address_text)
+            _update_teacher(
+                edit_key,
+                new_key["year"],
+                new_key["children_group_div"],
+                new_key["teacher_name"],
+                phone_text,
+                address_text,
+            )
         else:
-            if _teacher_exists(year, group_text, name_text):
-                _alert(f"이미 같은 데이터가 있습니다: {year} / {group_text} / {name_text}")
+            if _teacher_exists(new_key):
+                _alert(
+                    "이미 같은 데이터가 있습니다: "
+                    f"{new_key['year']} / {new_key['children_group_div']} / {new_key['teacher_name']}"
+                )
                 return None
-            _save_teacher(year, group_text, name_text, phone_text, address_text)
+            _save_teacher(
+                new_key["year"],
+                new_key["children_group_div"],
+                new_key["teacher_name"],
+                phone_text,
+                address_text,
+            )
     except Exception as exc:  # noqa: BLE001
         _alert(f"저장하지 못했습니다: {exc}")
         return None
 
-    _remember_saved(year, group_text, name_text)
-    return year
+    _remember_saved(new_key)
+    return new_key["year"]
 
 
 _INPUT_KEYS = (
@@ -304,26 +360,25 @@ def _parse_teacher_key(
 
 
 def _handle_delete(year_text: str, group_text: str, name_text: str) -> bool:
-    """선택한 행이 있으면 그 행을, 없으면 입력 칸의 키로 삭제한다."""
-    edit_key = st.session_state.get("teacher_edit_key")
-    if edit_key:
-        year = int(edit_key["year"])
-        group = str(edit_key["children_group_div"])
-        name = str(edit_key["teacher_name"])
-    else:
-        parsed = _parse_teacher_key(year_text, group_text, name_text)
-        if parsed is None:
-            return False
-        year, group, name = parsed
-
+    """선택한 행의 기본 키로만 삭제한다. 선택이 없으면 입력 칸의 세 키로 삭제한다."""
+    edit_raw = st.session_state.get("teacher_edit_key")
     try:
-        _delete_teacher(year, group, name)
+        if edit_raw:
+            # 그리드에서 고른 행의 키만 사용한다. 입력 칸을 바꿔도 다른 행이 지워지지 않는다.
+            key = _as_teacher_key(edit_raw)
+        else:
+            parsed = _parse_teacher_key(year_text, group_text, name_text)
+            if parsed is None:
+                return False
+            year, group, name = parsed
+            key = _make_teacher_key(year, name, group)
+        _delete_teacher(key)
     except Exception as exc:  # noqa: BLE001
         _alert(f"삭제하지 못했습니다: {exc}")
         return False
 
     st.session_state["teacher_clear_requested"] = True
-    _refresh_teacher_list(year)
+    _refresh_teacher_list(key["year"])
     return True
 
 
@@ -341,7 +396,7 @@ def _apply_form_overrides() -> None:
     st.session_state["teacher_input_name"] = fill["name"]
     st.session_state["teacher_input_phone"] = fill["phone"]
     st.session_state["teacher_input_address"] = fill["address"]
-    st.session_state["teacher_edit_key"] = fill["key"]
+    st.session_state["teacher_edit_key"] = _as_teacher_key(fill["key"])
 
 
 def _queue_selected_row(rows: list[dict], selected: list[int]) -> None:
@@ -365,7 +420,7 @@ def _queue_selected_row(rows: list[dict], selected: list[int]) -> None:
         "name": name,
         "phone": "" if row.get("phone") is None else str(row.get("phone")),
         "address": "" if row.get("address") is None else str(row.get("address")),
-        "key": {"year": year, "children_group_div": group, "teacher_name": name},
+        "key": _make_teacher_key(year, name, group),
     }
     st.rerun()
 
