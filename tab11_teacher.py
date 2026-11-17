@@ -436,7 +436,6 @@ def render() -> None:
         return
 
     labels = [label for _key, label in GRID_COLUMNS]
-    st.caption("행을 선택하면 입력 칸에 넣습니다. 저장은 신규·수정, 삭제는 선택한 행을 지웁니다.")
     generation = int(st.session_state.get("teacher_grid_generation", 0))
     selected = st.dataframe(
         _to_display_rows(rows),

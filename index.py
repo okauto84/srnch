@@ -62,14 +62,22 @@ def _admin_password_ok() -> bool:
 st.markdown("### 새꿈이")
 
 # 메뉴 탭 + 하단 콘텐츠 영역
-tab_list, tab_teacher, tab_admin = st.tabs(["목록", "담임정보", "ADMIN"])
+# 목록 탭을 고르면 다시 실행해 DB에서 members를 다시 읽는다.
+tab_list, tab_teacher, tab_admin = st.tabs(
+    ["목록", "담임정보", "ADMIN"],
+    key="main_tabs",
+    on_change="rerun",
+)
 
-with tab_list:
-    tab10_list.render()
+if tab_list.open:
+    with tab_list:
+        tab10_list.render(force_refresh=True)
 
-with tab_teacher:
-    tab11_teacher.render()
+if tab_teacher.open:
+    with tab_teacher:
+        tab11_teacher.render()
 
-with tab_admin:
-    if _admin_password_ok():
-        tab90_admin.render()
+if tab_admin.open:
+    with tab_admin:
+        if _admin_password_ok():
+            tab90_admin.render()

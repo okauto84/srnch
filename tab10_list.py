@@ -141,8 +141,15 @@ def _grid_sort_key(row: dict) -> tuple:
     return (group == "", group, name)
 
 
-def _load_indexed(year: int) -> list[dict]:
+def clear_members_cache() -> None:
+    """목록·챗봇용 members 캐시를 비운다."""
+    _fetch_members.clear()
+
+
+def _load_indexed(year: int, *, force_refresh: bool = False) -> list[dict]:
     """그리드와 같은 정렬(어린이 조직, 이름)로 해당 연도 회원을 읽는다."""
+    if force_refresh:
+        clear_members_cache()
     return _fetch_members(
         _supabase_url(_secret("SUPABASE_PROJECT")),
         _secret("SUPABASE_KEY"),
@@ -343,7 +350,7 @@ def _render_chat(members: list[dict]) -> None:
     st.rerun()
 
 
-def render() -> None:
+def render(*, force_refresh: bool = False) -> None:
     st.markdown(
         """
         <style>
@@ -421,7 +428,7 @@ def render() -> None:
         selected_year = st.selectbox("연도", options=list(YEAR_OPTIONS), key="member_list_year")
 
     try:
-        indexed = _load_indexed(int(selected_year))
+        indexed = _load_indexed(int(selected_year), force_refresh=force_refresh)
     except Exception as exc:  # noqa: BLE001
         st.error(f"회원 목록을 불러오지 못했습니다: {exc}")
         return
