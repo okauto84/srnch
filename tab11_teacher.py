@@ -261,14 +261,11 @@ def _handle_save(
 
     edit_raw = st.session_state.get("teacher_edit_key")
     try:
-        if edit_raw:
-            edit_key = _as_teacher_key(edit_raw)
-            if not _same_teacher(edit_key, new_key) and _teacher_exists(new_key):
-                _alert(
-                    "이미 같은 데이터가 있습니다: "
-                    f"{new_key['year']} / {new_key['children_group_div']} / {new_key['teacher_name']}"
-                )
-                return None
+        edit_key = _as_teacher_key(edit_raw) if edit_raw else None
+        # 선택한 행과 키가 같을 때만 수정한다.
+        # 키가 다르면 신규 추가다. 예전처럼 이전 행 키를 바꿔 쓰면
+        # 강미옥 행이 김지영으로 바뀌며 사라지는 일이 난다.
+        if edit_key and _same_teacher(edit_key, new_key):
             _update_teacher(
                 edit_key,
                 new_key["year"],
