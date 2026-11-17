@@ -68,23 +68,59 @@ def _today() -> str:
     return date.today().isoformat()
 
 
-def _save_teacher(year: int, children_group_div: str, teacher_name: str) -> None:
-    """연도, 조직, 이름을 srnch_teacher에 저장한다."""
+def _teacher_payload(
+    year: int,
+    children_group_div: str,
+    teacher_name: str,
+    phone: str,
+    address: str,
+) -> dict:
+    return {
+        "year": year,
+        "teacher_name": teacher_name,
+        "children_group_div": children_group_div,
+        "phone": phone or None,
+        "address": address or None,
+    }
+
+
+def _save_teacher(
+    year: int,
+    children_group_div: str,
+    teacher_name: str,
+    phone: str,
+    address: str,
+) -> None:
+    """연도, 조직, 이름, 연락처, 주소를 srnch_teacher에 새로 저장한다."""
     today = _today()
-    (
+    payload = _teacher_payload(year, children_group_div, teacher_name, phone, address)
+    payload["created_at"] = today
+    payload["updated_at"] = today
+    _client().table("srnch_teacher").insert(payload).execute()
+
+
+def _update_teacher(
+    edit_key: dict,
+    year: int,
+    children_group_div: str,
+    teacher_name: str,
+    phone: str,
+    address: str,
+) -> None:
+    """선택한 행의 연도·조직·이름·연락처·주소를 고친다."""
+    payload = _teacher_payload(year, children_group_div, teacher_name, phone, address)
+    payload["updated_at"] = _today()
+    response = (
         _client()
         .table("srnch_teacher")
-        .insert(
-            {
-                "year": year,
-                "teacher_name": teacher_name,
-                "children_group_div": children_group_div,
-                "created_at": today,
-                "updated_at": today,
-            }
-        )
+        .update(payload)
+        .eq("year", int(edit_key["year"]))
+        .eq("children_group_div", edit_key["children_group_div"])
+        .eq("teacher_name", edit_key["teacher_name"])
         .execute()
     )
+    if response.data is not None and not response.data:
+        raise LookupError("선택한 담임 정보를 찾지 못했습니다.")
 
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -117,10 +153,38 @@ def _alert(message: str) -> None:
     st.toast(message, icon="⚠️")
 
 
-def _handle_save(year_text: str, group_text: str, name_text: str) -> int | None:
+def _same_teacher(edit_key: dict | None, year: int, group_text: str, name_text: str) -> bool:
+    if not edit_key:
+        return False
+    return (
+        int(edit_key["year"]) == year
+        and edit_key["children_group_div"] == group_text
+        and edit_key["teacher_name"] == name_text
+    )
+
+
+def _remember_saved(year: int, group_text: str, name_text: str) -> None:
+    """방금 저장한 행을 이어서 고칠 수 있게 둔다."""
+    st.session_state["teacher_edit_key"] = {
+        "year": year,
+        "children_group_div": group_text,
+        "teacher_name": name_text,
+    }
+    st.session_state["teacher_loaded_sig"] = (str(year), group_text, name_text)
+
+
+def _handle_save(
+    year_text: str,
+    group_text: str,
+    name_text: str,
+    phone_text: str,
+    address_text: str,
+) -> int | None:
     year_text = year_text.strip()
     group_text = group_text.strip()
     name_text = name_text.strip()
+    phone_text = phone_text.strip()
+    address_text = address_text.strip()
     missing = [
         label
         for label, value in (("연도", year_text), ("조직", group_text), ("이름", name_text))
@@ -142,37 +206,125 @@ def _handle_save(year_text: str, group_text: str, name_text: str) -> int | None:
         _alert("조직은 1-1-5 형식으로 입력하세요.")
         return None
 
+    edit_key = st.session_state.get("teacher_edit_key")
     try:
-        if _teacher_exists(year, group_text, name_text):
-            _alert(f"이미 같은 데이터가 있습니다: {year} / {group_text} / {name_text}")
-            return None
-        _save_teacher(year, group_text, name_text)
+        if edit_key:
+            if not _same_teacher(edit_key, year, group_text, name_text) and _teacher_exists(
+                year, group_text, name_text
+            ):
+                _alert(f"이미 같은 데이터가 있습니다: {year} / {group_text} / {name_text}")
+                return None
+            _update_teacher(edit_key, year, group_text, name_text, phone_text, address_text)
+        else:
+            if _teacher_exists(year, group_text, name_text):
+                _alert(f"이미 같은 데이터가 있습니다: {year} / {group_text} / {name_text}")
+                return None
+            _save_teacher(year, group_text, name_text, phone_text, address_text)
     except Exception as exc:  # noqa: BLE001
         _alert(f"저장하지 못했습니다: {exc}")
         return None
 
+    _remember_saved(year, group_text, name_text)
     st.session_state["teacher_data_version"] = int(st.session_state.get("teacher_data_version", 0)) + 1
     if year in YEAR_OPTIONS:
         st.session_state["teacher_list_year"] = year
     return year
 
 
+_INPUT_KEYS = (
+    "teacher_input_year",
+    "teacher_input_group",
+    "teacher_input_name",
+    "teacher_input_phone",
+    "teacher_input_address",
+)
+
+
+def _apply_form_overrides() -> None:
+    """선택 행이나 새로 입력을 위젯이 그려지기 전에 반영한다."""
+    if st.session_state.pop("teacher_clear_requested", False):
+        for key in _INPUT_KEYS:
+            st.session_state[key] = ""
+        st.session_state.pop("teacher_edit_key", None)
+        st.session_state.pop("teacher_loaded_sig", None)
+        st.session_state.pop("teacher_pending_fill", None)
+        st.session_state["teacher_grid_generation"] = (
+            int(st.session_state.get("teacher_grid_generation", 0)) + 1
+        )
+        return
+
+    fill = st.session_state.pop("teacher_pending_fill", None)
+    if not fill:
+        return
+    st.session_state["teacher_input_year"] = fill["year"]
+    st.session_state["teacher_input_group"] = fill["group"]
+    st.session_state["teacher_input_name"] = fill["name"]
+    st.session_state["teacher_input_phone"] = fill["phone"]
+    st.session_state["teacher_input_address"] = fill["address"]
+    st.session_state["teacher_edit_key"] = fill["key"]
+
+
+def _queue_selected_row(rows: list[dict], selected: list[int]) -> None:
+    """고른 행이 바뀌면 입력 칸에 넣기 위해 한 번 더 그린다."""
+    if not selected:
+        return
+    index = selected[0]
+    if index < 0 or index >= len(rows):
+        return
+    row = rows[index]
+    year = int(row["year"])
+    group = str(row.get("children_group_div") or "")
+    name = str(row.get("teacher_name") or "")
+    sig = (str(year), group, name)
+    if sig == st.session_state.get("teacher_loaded_sig"):
+        return
+    st.session_state["teacher_loaded_sig"] = sig
+    st.session_state["teacher_pending_fill"] = {
+        "year": str(year),
+        "group": group,
+        "name": name,
+        "phone": "" if row.get("phone") is None else str(row.get("phone")),
+        "address": "" if row.get("address") is None else str(row.get("address")),
+        "key": {"year": year, "children_group_div": group, "teacher_name": name},
+    }
+    st.rerun()
+
+
 def render() -> None:
     """담임 정보 입력과 연도별 목록."""
+    _apply_form_overrides()
     st.markdown("**담임 정보**")
-    col_year, col_group, col_name, col_save = st.columns([1, 1.4, 1.2, 0.7], vertical_alignment="bottom")
+    col_year, col_group, col_name, col_phone = st.columns(
+        [1, 1.3, 1.2, 1.6], vertical_alignment="bottom"
+    )
     with col_year:
         year_text = st.text_input("연도", key="teacher_input_year")
     with col_group:
         group_text = st.text_input("조직", placeholder="1-1-5", key="teacher_input_group")
     with col_name:
         name_text = st.text_input("이름", key="teacher_input_name")
+    with col_phone:
+        phone_text = st.text_input("연락처", key="teacher_input_phone")
+
+    col_address, col_new, col_save = st.columns([4.2, 0.95, 0.7], vertical_alignment="bottom")
+    with col_address:
+        address_text = st.text_input("주소", key="teacher_input_address")
+    with col_new:
+        clear_clicked = st.button("새로 입력", use_container_width=True, key="teacher_new_btn")
     with col_save:
         submitted = st.button("저장", use_container_width=True, key="teacher_save_btn")
 
+    if clear_clicked:
+        st.session_state["teacher_clear_requested"] = True
+        st.rerun()
+
     if submitted:
-        if _handle_save(year_text, group_text, name_text) is not None:
+        saved = _handle_save(year_text, group_text, name_text, phone_text, address_text)
+        if saved is not None:
             st.session_state["teacher_saved_msg"] = True
+            st.session_state["teacher_grid_generation"] = (
+                int(st.session_state.get("teacher_grid_generation", 0)) + 1
+            )
 
     if st.session_state.pop("teacher_saved_msg", False):
         st.success("저장했습니다.")
@@ -200,11 +352,16 @@ def render() -> None:
         return
 
     labels = [label for _key, label in GRID_COLUMNS]
-    st.dataframe(
+    st.caption("행을 선택하면 입력 칸에 넣습니다. 수정 후 저장하면 그 행에 반영됩니다.")
+    generation = int(st.session_state.get("teacher_grid_generation", 0))
+    selected = st.dataframe(
         _to_display_rows(rows),
         hide_index=True,
         use_container_width=True,
         column_order=labels,
+        on_select="rerun",
+        selection_mode="single-row",
+        key=f"teacher_grid_{selected_year}_{generation}",
         column_config={
             label: st.column_config.TextColumn(
                 label,
@@ -214,3 +371,4 @@ def render() -> None:
             for label in labels
         },
     )
+    _queue_selected_row(rows, list(selected.selection.rows))
