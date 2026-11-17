@@ -264,7 +264,9 @@ def _clear_form() -> None:
     )
 
 
-def _bump_list(year: int | None = None) -> None:
+def _refresh_teacher_list(year: int | None = None) -> None:
+    """저장·삭제 뒤 캐시를 비우고 그리드가 최신 목록을 다시 읽게 한다."""
+    _fetch_teachers.clear()
     st.session_state["teacher_data_version"] = int(st.session_state.get("teacher_data_version", 0)) + 1
     st.session_state["teacher_grid_generation"] = (
         int(st.session_state.get("teacher_grid_generation", 0)) + 1
@@ -321,7 +323,7 @@ def _handle_delete(year_text: str, group_text: str, name_text: str) -> bool:
         return False
 
     st.session_state["teacher_clear_requested"] = True
-    _bump_list(year)
+    _refresh_teacher_list(year)
     return True
 
 
@@ -398,7 +400,8 @@ def render() -> None:
         saved = _handle_save(year_text, group_text, name_text, phone_text, address_text)
         if saved is not None:
             st.session_state["teacher_saved_msg"] = True
-            _bump_list(saved)
+            _refresh_teacher_list(saved)
+            st.rerun()
 
     if deleted:
         if _handle_delete(year_text, group_text, name_text):
