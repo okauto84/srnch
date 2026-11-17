@@ -14,7 +14,16 @@ GRID_COLUMNS = (
     ("year", "연도"),
     ("children_group_div", "조직"),
     ("teacher_name", "이름"),
+    ("phone", "연락처"),
+    ("address", "주소"),
 )
+COLUMN_WIDTHS = {
+    "연도": 80,
+    "조직": 110,
+    "이름": 110,
+    "연락처": 140,
+    "주소": 280,
+}
 
 
 def _secret(name: str) -> str:
@@ -83,7 +92,7 @@ def _fetch_teachers(year: int, _version: int) -> list[dict]:
     response = (
         _client()
         .table("srnch_teacher")
-        .select("year,children_group_div,teacher_name")
+        .select("year,children_group_div,teacher_name,phone,address")
         .eq("year", year)
         .order("children_group_div")
         .order("teacher_name")
@@ -197,7 +206,11 @@ def render() -> None:
         use_container_width=True,
         column_order=labels,
         column_config={
-            label: st.column_config.TextColumn(label, alignment="center")
+            label: st.column_config.TextColumn(
+                label,
+                width=COLUMN_WIDTHS[label],
+                alignment="left" if label == "주소" else "center",
+            )
             for label in labels
         },
     )
