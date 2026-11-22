@@ -1,10 +1,15 @@
-"""목록 탭: srnch_members를 읽기 전용으로 표시."""
+"""목록 탭: srnch_members 조회, 조직 구분 편집."""
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
+from datetime import date
+from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 from openai import OpenAI
 from supabase import create_client
 
@@ -48,6 +53,13 @@ PRE_PROMPT = """# 역할
 # members
 {members}
 """
+
+_ORG_DIV_RE = re.compile(r"^(\d+)-(\d+)-(\d+)$")
+_ORG_CLASS_SPAN = 30
+_ORG_BOARD = components.declare_component(
+    "org_board",
+    path=str(Path(__file__).resolve().parent / "components" / "org_board"),
+)
 
 COLUMN_WIDTHS = {
     "이름": 90,
@@ -350,6 +362,232 @@ def _render_chat(members: list[dict]) -> None:
     st.rerun()
 
 
+def _as_int(value: object) -> int | None:
+    try:
+        if isinstance(value, bool) or value is None or value == "":
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_org_div(value: object) -> tuple[int, int, int] | None:
+    match = _ORG_DIV_RE.fullmatch(str(value or "").strip())
+    if not match:
+        return None
+    dept, grade, klass = (int(part) for part in match.groups())
+    if not (1 <= dept <= 30 and 1 <= grade <= 30 and 1 <= klass <= 60):
+        return None
+    return dept, grade, klass
+
+
+def _format_children_group(template: str, dept: int, grade: int, klass: int) -> str:
+    """'03.유년 - 유년1부 - 2학년 - 05반' 형태에서 부·학년·반 숫자만 바꾼다."""
+    text = (template or "").strip()
+    dept_text = f"유년{dept}부"
+    grade_text = f"{grade}학년"
+    if not re.search(r"유년\s*\d+\s*부", text):
+        return f"{dept_text} - {grade_text} - {klass:02d}반"
+    width = 2
+    found = re.search(r"(\d+)\s*반", text)
+    if found:
+        width = max(len(found.group(1)), len(str(klass)))
+    klass_text = f"{str(klass).zfill(width)}반"
+    text = re.sub(r"유년\s*\d+\s*부", dept_text, text, count=1)
+    text = re.sub(r"\d+\s*학년", grade_text, text, count=1)
+    text = re.sub(r"\d+\s*반", lambda _match: klass_text, text, count=1)
+    return text
+
+
+def _class_columns(klasses: set[int]) -> list[int]:
+    if not klasses:
+        return []
+    highest = max(klasses)
+    if highest <= _ORG_CLASS_SPAN:
+        return list(range(1, highest + 1))
+    return sorted(klasses)
+
+
+def _org_spec(year: int, rows: list[dict]) -> dict | None:
+    """부-학년-반으로 묶인 회원만 조직 구분 데이터로 만든다."""
+    members: list[dict] = []
+    seen: set[int] = set()
+    grades_by_dept: dict[int, set[int]] = {}
+    klasses: set[int] = set()
+    for row in rows:
+        parsed = _parse_org_div(row.get("children_group_div"))
+        member_id = _as_int(row.get("id"))
+        if parsed is None or member_id is None or member_id in seen:
+            continue
+        label = f"{str(row.get('name') or '').strip()}{str(row.get('name_distinct') or '').strip()}"
+        if not label:
+            continue
+        dept, grade, klass = parsed
+        seen.add(member_id)
+        members.append(
+            {
+                "id": member_id,
+                "label": label,
+                "dept": dept,
+                "grade": grade,
+                "klass": klass,
+            }
+        )
+        grades_by_dept.setdefault(dept, set()).add(grade)
+        klasses.add(klass)
+    if not members:
+        return None
+    members.sort(key=lambda item: (item["dept"], item["grade"], item["klass"], item["label"], item["id"]))
+    return {
+        "year": int(year),
+        "classes": _class_columns(klasses),
+        "depts": [
+            {"dept": dept, "grades": sorted(grades)}
+            for dept, grades in sorted(grades_by_dept.items())
+        ],
+        "members": members,
+    }
+
+
+def _org_signature(year: int, spec: dict) -> str:
+    parts = [f"{item['id']}:{item['dept']}-{item['grade']}-{item['klass']}" for item in spec["members"]]
+    raw = f"{year}|{'|'.join(parts)}"
+    return hashlib.sha1(raw.encode()).hexdigest()[:16]
+
+
+def _chunks(items: list[int], size: int):
+    for start in range(0, len(items), size):
+        yield items[start : start + size]
+
+
+def _apply_org_save(year: int, rows: list[dict], event: dict) -> tuple[int, int]:
+    """메모리에 쌓인 반 이동·삭제를 srnch_members에 반영한다."""
+    by_id: dict[int, dict] = {}
+    template = ""
+    for row in rows:
+        member_id = _as_int(row.get("id"))
+        if member_id is None:
+            continue
+        by_id[member_id] = row
+        if not template and str(row.get("children_group") or "").strip():
+            template = str(row.get("children_group") or "").strip()
+
+    moves_in = event.get("moves") or []
+    deletes_in = event.get("deletes") or []
+    if not isinstance(moves_in, list) or not isinstance(deletes_in, list):
+        raise ValueError("저장 데이터 형식이 올바르지 않습니다.")
+    if len(moves_in) > 2000 or len(deletes_in) > 2000:
+        raise ValueError("한 번에 저장할 수 있는 건수를 넘었습니다.")
+
+    delete_ids: list[int] = []
+    for raw in deletes_in:
+        member_id = _as_int(raw)
+        if member_id is None or member_id not in by_id:
+            raise ValueError("삭제할 회원을 찾지 못했습니다.")
+        if member_id not in delete_ids:
+            delete_ids.append(member_id)
+    delete_set = set(delete_ids)
+
+    planned: list[tuple[int, str, str]] = []
+    for raw in moves_in:
+        if not isinstance(raw, dict):
+            raise ValueError("이동 데이터가 올바르지 않습니다.")
+        member_id = _as_int(raw.get("id"))
+        dept = _as_int(raw.get("dept"))
+        grade = _as_int(raw.get("grade"))
+        klass = _as_int(raw.get("klass"))
+        if member_id is None or member_id not in by_id or member_id in delete_set:
+            continue
+        if dept is None or grade is None or klass is None:
+            raise ValueError("이동할 반 정보가 올바르지 않습니다.")
+        if not (1 <= dept <= 30 and 1 <= grade <= 30 and 1 <= klass <= 60):
+            raise ValueError("이동할 반 정보가 올바르지 않습니다.")
+        group_div = f"{dept}-{grade}-{klass}"
+        source = str(by_id[member_id].get("children_group") or template)
+        group = _format_children_group(source, dept, grade, klass)
+        if group_div == str(by_id[member_id].get("children_group_div") or "") and group == source:
+            continue
+        planned.append((member_id, group_div, group))
+
+    client = create_client(
+        _supabase_url(_secret("SUPABASE_PROJECT")),
+        _secret("SUPABASE_KEY"),
+    )
+    today = date.today().isoformat()
+    for member_id, group_div, group in planned:
+        (
+            client.table("srnch_members")
+            .update(
+                {
+                    "children_group_div": group_div,
+                    "children_group": group,
+                    "updated_at": today,
+                }
+            )
+            .eq("id", member_id)
+            .eq("year", year)
+            .execute()
+        )
+    for chunk in _chunks(delete_ids, 200):
+        client.table("srnch_members").delete().in_("id", chunk).eq("year", year).execute()
+    return len(planned), len(delete_ids)
+
+
+def _org_saved_text(moved: int, deleted: int) -> str:
+    parts: list[str] = []
+    if moved:
+        parts.append(f"이동 {moved}건")
+    if deleted:
+        parts.append(f"삭제 {deleted}건")
+    detail = ", ".join(parts) if parts else "변경 없음"
+    return f"조직 구분을 저장했습니다. {detail}."
+
+
+def _render_org_board(year: int, rows: list[dict]) -> None:
+    """그리드 아래 조직 구분. 이동·삭제는 화면 메모리에 두고 저장 때 DB에 반영한다."""
+    st.markdown("**조직 구분**")
+    saved = st.session_state.pop("org_saved_msg", "")
+    error = st.session_state.pop("org_error_msg", "")
+    if saved:
+        st.success(saved)
+    if error:
+        st.error(error)
+
+    spec = _org_spec(year, rows)
+    if spec is None:
+        st.info("부-학년-반으로 묶을 회원이 없습니다.")
+        return
+
+    signature = _org_signature(year, spec)
+    spec["sig"] = signature
+    spec["error_nonce"] = str(st.session_state.get("org_error_nonce") or "")
+    event = _ORG_BOARD(spec=spec, key=f"org_board_{year}_{signature}", default=None)
+    if not isinstance(event, dict) or event.get("action") != "save":
+        return
+    nonce = str(event.get("nonce") or "").strip()
+    event_year = _as_int(event.get("year"))
+    if not nonce or event_year != int(year):
+        return
+    if nonce == st.session_state.get("org_applied_nonce"):
+        return
+
+    try:
+        with st.spinner("조직 구분을 저장하는 중..."):
+            moved, deleted = _apply_org_save(int(year), rows, event)
+    except Exception as exc:  # noqa: BLE001
+        st.session_state["org_applied_nonce"] = nonce
+        st.session_state["org_error_nonce"] = nonce
+        st.session_state["org_error_msg"] = f"조직 구분을 저장하지 못했습니다: {exc}"
+        st.rerun()
+        return
+
+    st.session_state["org_applied_nonce"] = nonce
+    st.session_state["org_error_nonce"] = ""
+    st.session_state["org_saved_msg"] = _org_saved_text(moved, deleted)
+    clear_members_cache()
+    st.rerun()
+
+
 def render(*, force_refresh: bool = False) -> None:
     st.markdown(
         """
@@ -450,4 +688,5 @@ def render(*, force_refresh: bool = False) -> None:
             for _key, label in VISIBLE_COLUMNS
         },
     )
+    _render_org_board(int(selected_year), indexed)
     _render_chat(indexed)

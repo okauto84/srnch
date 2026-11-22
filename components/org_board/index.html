@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --panel: #070809;
+      --line: #2c5d94;
+      --head: #e7eef6;
+      --dept: #f4e29a;
+      --cell: #d6e6f7;
+      --ink: #1b2744;
+      --dept-w: 54px;
+      --gap: 8px;
+      --class-w: 236px;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      background: var(--panel);
+      color: #e8edf2;
+      font-family: "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+    }
+    .panel { padding: 12px 12px 14px; }
+    .board-scroll {
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding-bottom: 6px;
+      scrollbar-color: #3c4654 transparent;
+    }
+    .board-scroll::-webkit-scrollbar { height: 10px; }
+    .board-scroll::-webkit-scrollbar-thumb {
+      background: #3c4654;
+      border-radius: 99px;
+    }
+    .board {
+      display: grid;
+      grid-template-columns: var(--dept-w) var(--dept-w) repeat(var(--cols), minmax(var(--class-w), max-content));
+      gap: var(--gap);
+      width: max-content;
+      min-width: 100%;
+      user-select: none;
+    }
+    .head, .dept, .grade, .cell {
+      border: 2px solid var(--line);
+      color: var(--ink);
+      border-radius: 2px;
+    }
+    .head {
+      background: var(--head);
+      min-height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .dept, .grade {
+      background: var(--dept);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .cell {
+      background: var(--cell);
+      min-height: 78px;
+      padding: 8px 8px 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: background-color 0.16s ease, box-shadow 0.16s ease;
+    }
+    .cell.selected {
+      background: #c5def8;
+      box-shadow: inset 0 0 0 2px #143e70;
+    }
+    .cell.drop {
+      background: #f3f9ff;
+      box-shadow: inset 0 0 0 2px #1d6adf;
+    }
+    .sticky-dept, .sticky-grade {
+      position: sticky;
+      z-index: 3;
+      box-shadow: var(--gap) 0 0 var(--panel);
+    }
+    .sticky-dept { left: 0; }
+    .sticky-grade { left: calc(var(--dept-w) + var(--gap)); }
+    .head.sticky-dept, .head.sticky-grade { z-index: 4; }
+    .block-gap { height: 10px; }
+    .names {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+    }
+    .name-row {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      max-width: 100%;
+    }
+    .chip {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      font-size: 13.5px;
+      font-weight: 600;
+      line-height: 1.35;
+      padding: 1px 1px;
+      white-space: nowrap;
+      cursor: grab;
+      border-radius: 4px;
+      touch-action: none;
+    }
+    .chip:hover { background: rgba(255, 255, 255, 0.55); }
+    .chip.dragging { opacity: 0.28; }
+    body.is-dragging, body.is-dragging .chip { cursor: grabbing; }
+    .ghost {
+      position: fixed;
+      left: 0;
+      top: 0;
+      z-index: 30;
+      pointer-events: none;
+      padding: 3px 7px;
+      border-radius: 6px;
+      background: #fff;
+      color: var(--ink);
+      border: 1px solid #24588f;
+      box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+      font-size: 13.5px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .footer {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      padding-top: 14px;
+    }
+    .hint, .status {
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.45;
+      text-align: center;
+    }
+    .hint { color: #c5ced8; }
+    .status { min-height: 1.1em; color: #9ec0ff; }
+    .save {
+      appearance: none;
+      border: 0;
+      background: #2563eb;
+      color: #fff;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      padding: 8px 32px;
+      border-radius: 8px;
+      cursor: pointer;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+    }
+    .save:hover { background: #1d4ed8; }
+    .save:disabled { opacity: 0.55; cursor: progress; }
+    #delpop {
+      position: fixed;
+      z-index: 40;
+      transform: translate(-50%, 0);
+      background: #fff;
+      color: #b42318;
+      border: 1px solid #b42318;
+      border-radius: 8px;
+      padding: 5px 12px;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.28);
+    }
+    #delpop[hidden] { display: none !important; }
+    #delpop:hover { background: #fff5f5; }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <div class="board-scroll" id="scroller"></div>
+    <div class="footer">
+      <p class="hint">반을 선택한 뒤 이름을 끌어 다른 반으로 옮기거나, 이름을 두 번 눌러 삭제합니다. 저장 전까지는 화면에만 반영됩니다.</p>
+      <button class="save" id="save" type="button">저장</button>
+      <p class="status" id="status"></p>
+    </div>
+  </div>
+  <button id="delpop" type="button" hidden>삭제</button>
+  <script>
+    const scroller = document.getElementById("scroller");
+    const saveBtn = document.getElementById("save");
+    const statusEl = document.getElementById("status");
+    const delpop = document.getElementById("delpop");
+
+    let builtSig = "";
+    let seenError = "";
+    let specYear = 0;
+    let state = new Map();
+    let original = new Map();
+    let selected = null;
+    let drag = null;
+    let lastX = 0;
+    let lastY = 0;
+    let scrollRaf = 0;
+    let saveTimer = 0;
+    let frameHeight = 0;
+
+    function post(type, data) {
+      window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: type }, data), "*");
+    }
+
+    function fit() {
+      const panel = document.querySelector(".panel");
+      const panelBottom = panel ? panel.getBoundingClientRect().bottom : 160;
+      const popBottom = delpop.hidden ? 0 : delpop.getBoundingClientRect().bottom;
+      const height = Math.max(160, Math.ceil(Math.max(panelBottom, popBottom) + 8));
+      if (Math.abs(height - frameHeight) < 2) return;
+      frameHeight = height;
+      post("streamlit:setFrameHeight", { height: height });
+    }
+
+    function hidePop() {
+      delpop.hidden = true;
+      delpop.dataset.id = "";
+      frameHeight = 0;
+      requestAnimationFrame(fit);
+    }
+
+    function showPop(x, y, id) {
+      delpop.hidden = false;
+      delpop.style.left = x + "px";
+      delpop.style.top = (y + 10) + "px";
+      delpop.dataset.id = id;
+      frameHeight = 0;
+      requestAnimationFrame(fit);
+    }
+
+    function selectCell(cell) {
+      if (selected) selected.classList.remove("selected");
+      selected = cell || null;
+      if (selected) selected.classList.add("selected");
+    }
+
+    function cellKey(item) {
+      return item.dept + "-" + item.grade + "-" + item.klass;
+    }
+
+    function changeSets() {
+      const moves = [];
+      const deletes = [];
+      state.forEach(function (item, id) {
+        if (item.deleted) {
+          deletes.push(item.id);
+          return;
+        }
+        if (original.get(id) !== cellKey(item)) {
+          moves.push({
+            id: item.id,
+            dept: item.dept,
+            grade: item.grade,
+            klass: item.klass,
+          });
+        }
+      });
+      return { moves: moves, deletes: deletes };
+    }
+
+    function updateStatus() {
+      if (saveBtn.disabled) return;
+      const diff = changeSets();
+      const count = diff.moves.length + diff.deletes.length;
+      statusEl.textContent = count ? "저장 전 변경 " + count + "건" : "";
+    }
+
+    function makeChip(item) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "chip";
+      chip.textContent = item.label;
+      chip.dataset.id = String(item.id);
+      chip.dataset.key = "member-" + item.id;
+      chip.addEventListener("pointerdown", onChipPointerDown);
+      chip.addEventListener("dblclick", onChipDblClick);
+      return chip;
+    }
+
+    function renderChips() {
+      document.querySelectorAll(".cell .names").forEach(function (box) {
+        box.replaceChildren();
+      });
+      const grouped = new Map();
+      state.forEach(function (item) {
+        if (item.deleted) return;
+        const key = cellKey(item);
+        if (!grouped.has(key)) grouped.set(key, []);
+        grouped.get(key).push(item);
+      });
+      grouped.forEach(function (items, key) {
+        const parts = key.split("-");
+        const cell = document.querySelector(
+          '.cell[data-dept="' + parts[0] + '"][data-grade="' + parts[1] + '"][data-klass="' + parts[2] + '"] .names'
+        );
+        if (!cell) return;
+        items.sort(function (a, b) { return a.label.localeCompare(b.label, "ko"); });
+        for (let index = 0; index < items.length; index += 3) {
+          const row = document.createElement("div");
+          row.className = "name-row";
+          items.slice(index, index + 3).forEach(function (item) {
+            row.appendChild(makeChip(item));
+          });
+          cell.appendChild(row);
+        }
+      });
+      requestAnimationFrame(fit);
+    }
+
+    function place(el, column, row, rowSpan) {
+      el.style.gridColumn = String(column);
+      el.style.gridRow = rowSpan ? row + " / span " + rowSpan : String(row);
+    }
+
+    function mount(spec) {
+      cleanupDrag();
+      hidePop();
+      saveBtn.disabled = false;
+      window.clearTimeout(saveTimer);
+      specYear = Number(spec.year) || 0;
+      state = new Map();
+      original = new Map();
+      selected = null;
+      (spec.members || []).forEach(function (member) {
+        const id = String(member.id);
+        state.set(id, {
+          id: Number(member.id),
+          label: String(member.label || ""),
+          dept: Number(member.dept),
+          grade: Number(member.grade),
+          klass: Number(member.klass),
+          deleted: false,
+        });
+        original.set(id, Number(member.dept) + "-" + Number(member.grade) + "-" + Number(member.klass));
+      });
+
+      const classes = spec.classes || [];
+      const board = document.createElement("div");
+      board.className = "board";
+      board.style.setProperty("--cols", String(Math.max(classes.length, 1)));
+
+      function addHead(text, column, className) {
+        const head = document.createElement("div");
+        head.className = "head" + (className ? " " + className : "");
+        head.textContent = text;
+        place(head, column, 1);
+        board.appendChild(head);
+      }
+      addHead("부", 1, "sticky-dept");
+      addHead("학년", 2, "sticky-grade");
+      classes.forEach(function (klass, index) {
+        addHead(klass + "반", 3 + index, "");
+      });
+
+      let row = 2;
+      (spec.depts || []).forEach(function (block, blockIndex) {
+        if (blockIndex > 0) {
+          const gap = document.createElement("div");
+          gap.className = "block-gap";
+          gap.style.gridColumn = "1 / -1";
+          gap.style.gridRow = String(row);
+          board.appendChild(gap);
+          row += 1;
+        }
+        const grades = block.grades || [];
+        const dept = document.createElement("div");
+        dept.className = "dept sticky-dept";
+        dept.textContent = String(block.dept);
+        place(dept, 1, row, Math.max(grades.length, 1));
+        board.appendChild(dept);
+        grades.forEach(function (grade) {
+          const gradeCell = document.createElement("div");
+          gradeCell.className = "grade sticky-grade";
+          gradeCell.textContent = String(grade);
+          place(gradeCell, 2, row);
+          board.appendChild(gradeCell);
+          classes.forEach(function (klass, index) {
+            const cell = document.createElement("div");
+            cell.className = "cell";
+            cell.dataset.dept = String(block.dept);
+            cell.dataset.grade = String(grade);
+            cell.dataset.klass = String(klass);
+            place(cell, 3 + index, row);
+            const names = document.createElement("div");
+            names.className = "names";
+            cell.appendChild(names);
+            cell.addEventListener("pointerdown", function (event) {
+              if (event.target.closest(".chip")) return;
+              selectCell(cell);
+              hidePop();
+            });
+            board.appendChild(cell);
+          });
+          row += 1;
+        });
+      });
+
+      scroller.replaceChildren(board);
+      renderChips();
+      updateStatus();
+    }
+
+    function onChipPointerDown(event) {
+      if (event.button !== 0) return;
+      const chip = event.currentTarget;
+      const cell = chip.closest(".cell");
+      hidePop();
+      selectCell(cell);
+      const originX = event.clientX;
+      const originY = event.clientY;
+      try { chip.setPointerCapture(event.pointerId); } catch (err) { /* 캡처 미지원 */ }
+      const move = function (ev) {
+        const dx = ev.clientX - originX;
+        const dy = ev.clientY - originY;
+        if (!drag && dx * dx + dy * dy < 25) return;
+        if (!drag) beginDrag(chip, ev);
+        lastX = ev.clientX;
+        lastY = ev.clientY;
+        moveGhost(ev.clientX, ev.clientY);
+        markDrop(ev.clientX, ev.clientY);
+      };
+      const up = function (ev) {
+        chip.removeEventListener("pointermove", move);
+        if (drag) finishDrag(ev.clientX, ev.clientY);
+      };
+      chip.addEventListener("pointermove", move);
+      chip.addEventListener("pointerup", up, { once: true });
+      chip.addEventListener("pointercancel", up, { once: true });
+    }
+
+    function onChipDblClick(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      const chip = event.currentTarget;
+      const cell = chip.closest(".cell");
+      if (!cell) return;
+      selectCell(cell);
+      showPop(event.clientX, event.clientY, chip.dataset.id);
+    }
+
+    function beginDrag(chip, event) {
+      const ghost = document.createElement("div");
+      ghost.className = "ghost";
+      ghost.textContent = chip.textContent;
+      document.body.appendChild(ghost);
+      chip.classList.add("dragging");
+      document.body.classList.add("is-dragging");
+      drag = { id: chip.dataset.id, chip: chip, ghost: ghost };
+      lastX = event.clientX;
+      lastY = event.clientY;
+      moveGhost(event.clientX, event.clientY);
+      scrollRaf = requestAnimationFrame(tickScroll);
+    }
+
+    function moveGhost(x, y) {
+      if (!drag || !drag.ghost) return;
+      drag.ghost.style.transform = "translate3d(" + x + "px, " + y + "px, 0) translate(-50%, -130%)";
+    }
+
+    function cellAt(x, y) {
+      const el = document.elementFromPoint(x, y);
+      return el ? el.closest(".cell") : null;
+    }
+
+    function markDrop(x, y) {
+      document.querySelectorAll(".cell.drop").forEach(function (el) {
+        el.classList.remove("drop");
+      });
+      const cell = cellAt(x, y);
+      if (cell) cell.classList.add("drop");
+    }
+
+    function autoScroll(x) {
+      const rect = scroller.getBoundingClientRect();
+      const edge = 46;
+      if (x > rect.right - edge) {
+        scroller.scrollLeft += Math.ceil(8 + 16 * ((x - (rect.right - edge)) / edge));
+      } else if (x < rect.left + edge) {
+        scroller.scrollLeft -= Math.ceil(8 + 16 * ((rect.left + edge - x) / edge));
+      }
+    }
+
+    function tickScroll() {
+      if (!drag) return;
+      autoScroll(lastX);
+      markDrop(lastX, lastY);
+      scrollRaf = requestAnimationFrame(tickScroll);
+    }
+
+    function cleanupDrag() {
+      if (scrollRaf) cancelAnimationFrame(scrollRaf);
+      scrollRaf = 0;
+      if (drag && drag.ghost) drag.ghost.remove();
+      if (drag && drag.chip) drag.chip.classList.remove("dragging");
+      document.querySelectorAll(".cell.drop").forEach(function (el) {
+        el.classList.remove("drop");
+      });
+      document.body.classList.remove("is-dragging");
+      drag = null;
+    }
+
+    function finishDrag(x, y) {
+      const id = drag ? drag.id : "";
+      const cell = cellAt(x, y);
+      cleanupDrag();
+      if (!cell || !id) return;
+      const item = state.get(id);
+      if (!item || item.deleted) return;
+      const dept = Number(cell.dataset.dept);
+      const grade = Number(cell.dataset.grade);
+      const klass = Number(cell.dataset.klass);
+      if (item.dept === dept && item.grade === grade && item.klass === klass) return;
+      item.dept = dept;
+      item.grade = grade;
+      item.klass = klass;
+      renderChips();
+      selectCell(document.querySelector(
+        '.cell[data-dept="' + dept + '"][data-grade="' + grade + '"][data-klass="' + klass + '"]'
+      ));
+      updateStatus();
+    }
+
+    function onSave() {
+      const diff = changeSets();
+      if (!diff.moves.length && !diff.deletes.length) {
+        statusEl.textContent = "변경된 내용이 없습니다.";
+        return;
+      }
+      saveBtn.disabled = true;
+      statusEl.textContent = "저장하는 중...";
+      window.clearTimeout(saveTimer);
+      saveTimer = window.setTimeout(function () {
+        saveBtn.disabled = false;
+        if (statusEl.textContent === "저장하는 중...") {
+          statusEl.textContent = "저장 응답이 없습니다. 다시 저장해 주세요.";
+        }
+      }, 12000);
+      const nonce = (window.crypto && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : String(Date.now()) + "-" + Math.random().toString(16).slice(2);
+      post("streamlit:setComponentValue", {
+        dataType: "json",
+        value: {
+          action: "save",
+          nonce: nonce,
+          year: specYear,
+          moves: diff.moves,
+          deletes: diff.deletes,
+        },
+      });
+    }
+
+    function onRender(args) {
+      const spec = args.spec || {};
+      const sig = String(spec.sig || "");
+      if (sig && sig !== builtSig) {
+        builtSig = sig;
+        mount(spec);
+      }
+      const errorNonce = String(spec.error_nonce || "");
+      if (errorNonce && errorNonce !== seenError) {
+        seenError = errorNonce;
+        window.clearTimeout(saveTimer);
+        saveBtn.disabled = false;
+        statusEl.textContent = "저장하지 못했습니다. 다시 저장해 주세요.";
+      }
+      requestAnimationFrame(fit);
+    }
+
+    saveBtn.addEventListener("click", onSave);
+    delpop.addEventListener("click", function (event) {
+      event.stopPropagation();
+      const item = state.get(delpop.dataset.id || "");
+      if (item) item.deleted = true;
+      hidePop();
+      renderChips();
+      updateStatus();
+    });
+    document.addEventListener("pointerdown", function (event) {
+      if (delpop.hidden) return;
+      if (event.target === delpop) return;
+      hidePop();
+    }, true);
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") {
+        hidePop();
+        cleanupDrag();
+      }
+    });
+    window.addEventListener("resize", fit);
+    if (window.ResizeObserver) {
+      const observer = new ResizeObserver(function () { fit(); });
+      observer.observe(document.body);
+    }
+
+    window.addEventListener("message", function (event) {
+      if (event.source !== window.parent) return;
+      const data = event.data;
+      if (!data || data.type !== "streamlit:render") return;
+      onRender(data.args || {});
+    });
+    post("streamlit:componentReady", { apiVersion: 1 });
+    requestAnimationFrame(fit);
+  </script>
+</body>
+</html>
