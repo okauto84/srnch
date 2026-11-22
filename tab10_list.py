@@ -708,8 +708,8 @@ def _render_member_add(year: int) -> None:
         st.success(deleted_msg)
 
     st.markdown('<span class="member-quick-add"></span>', unsafe_allow_html=True)
-    name_col, distinct_col, gender_col, div_col, delete_col, save_col, _rest = st.columns(
-        [1.1, 0.6, 0.6, 1.0, 0.72, 0.72, 2.5],
+    name_col, distinct_col, gender_col, div_col, action_col, _rest = st.columns(
+        [1.1, 0.6, 0.6, 1.0, 1.6, 2.4],
         vertical_alignment="bottom",
     )
     with name_col:
@@ -720,10 +720,12 @@ def _render_member_add(year: int) -> None:
         gender = st.text_input("성별", key="member_add_gender")
     with div_col:
         group_div = st.text_input("조직", placeholder="1-1-5", key="member_add_div")
-    with delete_col:
-        deleted = st.button("삭제", key="member_add_delete_btn", type="secondary")
-    with save_col:
-        submitted = st.button("저장", key="member_add_save_btn", type="primary")
+    with action_col:
+        delete_col, save_col = st.columns(2, gap="small", vertical_alignment="bottom")
+        with delete_col:
+            deleted = st.button("삭제", key="member_add_delete_btn", type="secondary")
+        with save_col:
+            submitted = st.button("저장", key="member_add_save_btn", type="primary")
 
     if deleted:
         member_id = _as_int(st.session_state.get("member_selected_id"))
@@ -927,6 +929,16 @@ def render(*, force_refresh: bool = False) -> None:
             padding-top: 0.1rem;
             padding-bottom: 0.1rem;
             font-size: 0.82rem;
+        }
+        [data-testid="stHorizontalBlock"]:has([data-testid="stBaseButton-secondary"]):not(:has([data-testid="stHorizontalBlock"])) {
+            width: fit-content !important;
+            flex: 0 0 auto !important;
+            gap: 0.35rem !important;
+        }
+        [data-testid="stHorizontalBlock"]:has([data-testid="stBaseButton-secondary"]):not(:has([data-testid="stHorizontalBlock"])) > [data-testid="stColumn"] {
+            width: auto !important;
+            flex: 0 0 auto !important;
+            min-width: 0 !important;
         }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stButton"] button {
             min-height: 0;

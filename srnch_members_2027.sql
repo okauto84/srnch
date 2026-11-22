@@ -1,7 +1,12 @@
 -- 2027년 학생 명단.xlsx -> srnch_members
 -- children_group_div: 유치N부 -> N, 믿음(학년 숫자 없음) -> 1, NN반 -> N
 -- 예: 04.유치 유치1부 믿음 01반 -> 1-1-1
--- id는 기존 최대 id 다음에 붙인다. 이미 넣은 2027 자료를 다시 실행하면 중복된다.
+-- 다시 실행하면 year = 2027 행을 지운 뒤 다시 넣는다. 다른 연도는 유지한다.
+
+BEGIN;
+
+DELETE FROM srnch_members
+WHERE year = 2027;
 
 WITH src(ord, name, name_distinct, children_group, children_group_div) AS (
   VALUES
@@ -147,3 +152,5 @@ SELECT
 FROM src
 CROSS JOIN base
 ORDER BY src.ord;
+
+COMMIT;
