@@ -5,33 +5,33 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root {
-      --panel: #070809;
-      --line: #2c5d94;
-      --head: #e7eef6;
-      --dept: #f4e29a;
-      --cell: #d6e6f7;
-      --ink: #1b2744;
-      --dept-w: 54px;
+      --panel: #ffffff;
+      --line: #d7e3ef;
+      --head: #f6f8fb;
+      --dept: #fff6d4;
+      --cell: #e8f2fb;
+      --ink: #243044;
+      --dept-w: 48px;
       --gap: 8px;
-      --class-w: 236px;
+      --class-w: 196px;
     }
     * { box-sizing: border-box; }
     html, body {
       margin: 0;
       background: var(--panel);
-      color: #e8edf2;
+      color: var(--ink);
       font-family: "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
     }
-    .panel { padding: 12px 12px 14px; }
+    .panel { padding: 8px 4px 10px; }
     .board-scroll {
       overflow-x: auto;
       overflow-y: hidden;
-      padding-bottom: 6px;
-      scrollbar-color: #3c4654 transparent;
+      padding: 2px 2px 8px;
+      scrollbar-color: #c9d4e0 transparent;
     }
-    .board-scroll::-webkit-scrollbar { height: 10px; }
+    .board-scroll::-webkit-scrollbar { height: 8px; }
     .board-scroll::-webkit-scrollbar-thumb {
-      background: #3c4654;
+      background: #c9d4e0;
       border-radius: 99px;
     }
     .board {
@@ -43,17 +43,18 @@
       user-select: none;
     }
     .head, .dept, .grade, .cell {
-      border: 2px solid var(--line);
+      border: 1px solid var(--line);
       color: var(--ink);
-      border-radius: 2px;
+      border-radius: 12px;
+      box-shadow: 0 1px 2px rgba(36, 64, 96, 0.05);
     }
     .head {
       background: var(--head);
-      min-height: 38px;
+      min-height: 32px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 700;
     }
     .dept, .grade {
@@ -61,26 +62,29 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 18px;
+      font-size: 16px;
       font-weight: 700;
+      border-color: #f0e2a4;
     }
     .cell {
       background: var(--cell);
-      min-height: 78px;
-      padding: 8px 8px 7px;
+      min-height: 58px;
+      padding: 6px 6px 5px;
       display: flex;
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      transition: background-color 0.16s ease, box-shadow 0.16s ease;
+      transition: background-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
     }
     .cell.selected {
-      background: #c5def8;
-      box-shadow: inset 0 0 0 2px #143e70;
+      background: #dcedfb;
+      border-color: #8eb4d8;
+      box-shadow: 0 0 0 2px rgba(90, 146, 204, 0.28);
     }
     .cell.drop {
-      background: #f3f9ff;
-      box-shadow: inset 0 0 0 2px #1d6adf;
+      background: #f7fbff;
+      border-color: #7eace0;
+      box-shadow: 0 0 0 2px rgba(70, 130, 210, 0.28);
     }
     .sticky-dept, .sticky-grade {
       position: sticky;
@@ -96,12 +100,12 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 3px;
+      gap: 2px;
     }
     .name-row {
       display: flex;
       justify-content: center;
-      gap: 8px;
+      gap: 6px;
       max-width: 100%;
     }
     .chip {
@@ -110,7 +114,7 @@
       background: transparent;
       color: inherit;
       font: inherit;
-      font-size: 13.5px;
+      font-size: 12.5px;
       font-weight: 600;
       line-height: 1.35;
       padding: 1px 1px;
@@ -119,7 +123,7 @@
       border-radius: 4px;
       touch-action: none;
     }
-    .chip:hover { background: rgba(255, 255, 255, 0.55); }
+    .chip:hover { background: rgba(255, 255, 255, 0.72); }
     .chip.dragging { opacity: 0.28; }
     body.is-dragging, body.is-dragging .chip { cursor: grabbing; }
     .ghost {
@@ -129,12 +133,12 @@
       z-index: 30;
       pointer-events: none;
       padding: 3px 7px;
-      border-radius: 6px;
+      border-radius: 8px;
       background: #fff;
       color: var(--ink);
-      border: 1px solid #24588f;
-      box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
-      font-size: 13.5px;
+      border: 1px solid #c5d7ea;
+      box-shadow: 0 8px 18px rgba(36, 64, 96, 0.16);
+      font-size: 12.5px;
       font-weight: 700;
       white-space: nowrap;
     }
@@ -151,8 +155,8 @@
       line-height: 1.45;
       text-align: center;
     }
-    .hint { color: #c5ced8; }
-    .status { min-height: 1.1em; color: #9ec0ff; }
+    .hint { color: #6b7c8f; }
+    .status { min-height: 1.1em; color: #3d6fbf; }
     .save {
       appearance: none;
       border: 0;
