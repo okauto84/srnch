@@ -444,9 +444,9 @@ def _missing_secrets(names: tuple[str, ...]) -> list[str]:
     return missing
 
 
-def _run_data_batch() -> str:
-    """프로젝트 data/batch2027.py를 실행하고 출력 내용을 돌려준다."""
-    script = Path(__file__).resolve().parent / "data" / "batch2027.py"
+def _run_batch2027() -> str:
+    """이 파일과 같은 경로의 batch2027.py를 실행하고 출력 내용을 돌려준다."""
+    script = Path(__file__).resolve().parent / "batch2027.py"
     if not script.is_file():
         raise FileNotFoundError(f"배치 스크립트가 없습니다: {script}")
     env = os.environ.copy()
@@ -504,9 +504,9 @@ def render() -> None:
                 st.dataframe(preview, use_container_width=True)
 
     if batch_clicked:
-        with st.spinner("data/batch2027.py 실행 중..."):
+        with st.spinner("batch2027.py 실행 중..."):
             try:
-                report = _run_data_batch()
+                report = _run_batch2027()
             except Exception as exc:  # noqa: BLE001
                 st.error(f"batch2027 실패: {exc}")
                 return
