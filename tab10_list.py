@@ -132,7 +132,7 @@ def _fetch_members(url: str, key: str, year: int) -> list[dict]:
         client.table("srnch_members")
         .select("*")
         .eq("year", year)
-        .order("children_group", nullsfirst=False)
+        .order("children_group_div", nullsfirst=False)
         .order("name", nullsfirst=False)
         .limit(2000)
         .execute()
@@ -149,10 +149,14 @@ def _fetch_members(url: str, key: str, year: int) -> list[dict]:
 
 
 def _grid_sort_key(row: dict) -> tuple:
-    """어린이 조직, 이름 오름차순. 조직이 비어 있으면 뒤로 보낸다."""
-    group = str(row.get("children_group") or "").strip()
+    """조직(부-학년-반) 오름차순. 비어 있으면 뒤로 보내고, 같은 조직은 이름순이다."""
+    text = str(row.get("children_group_div") or "").strip()
     name = str(row.get("name") or "").strip()
-    return (group == "", group, name)
+    parts = text.split("-")
+    if len(parts) == 3 and all(part.isdigit() for part in parts):
+        dept, grade, klass = (int(part) for part in parts)
+        return (False, dept, grade, klass, name)
+    return (True, text, 0, 0, name)
 
 
 def clear_members_cache() -> None:
@@ -161,7 +165,7 @@ def clear_members_cache() -> None:
 
 
 def _load_indexed(year: int, *, force_refresh: bool = False) -> list[dict]:
-    """그리드와 같은 정렬(어린이 조직, 이름)로 해당 연도 회원을 읽는다."""
+    """그리드와 같은 정렬(조직, 이름)로 해당 연도 회원을 읽는다."""
     if force_refresh:
         clear_members_cache()
     return _fetch_members(
@@ -565,24 +569,25 @@ def _member_client():
     )
 
 
-def _member_group_fields(group_div: str, rows: list[dict]) -> tuple[str, str]:
+def _children_group_path(dept: int, grade: int, klass: int) -> str:
+    """조직 번호를 어린이 조직 경로로 바꾼다.
+
+    1-2-4 → 유년-유년1부-2학년-04반
+    2-2-11 → 유년-유년2부-2학년-11반
+    """
+    return f"유년-유년{dept}부-{grade}학년-{klass:02d}반"
+
+
+def _member_group_fields(group_div: str) -> tuple[str, str]:
     parsed = _parse_org_div(group_div)
     if parsed is None:
         raise ValueError("조직은 1-1-5 형식으로 입력하세요.")
     dept, grade, klass = parsed
-    template = next(
-        (
-            str(row.get("children_group") or "").strip()
-            for row in rows
-            if str(row.get("children_group") or "").strip()
-        ),
-        "",
-    )
-    return f"{dept}-{grade}-{klass}", _format_children_group(template, dept, grade, klass)
+    return f"{dept}-{grade}-{klass}", _children_group_path(dept, grade, klass)
 
 
-def _member_payload(name: str, distinct: str, gender: str, group_div: str, rows: list[dict]) -> dict:
-    children_group_div, children_group = _member_group_fields(group_div, rows)
+def _member_payload(name: str, distinct: str, gender: str, group_div: str) -> dict:
+    children_group_div, children_group = _member_group_fields(group_div)
     return {
         "name": name,
         "name_distinct": distinct or None,
@@ -599,12 +604,11 @@ def _insert_member(
     distinct: str,
     gender: str,
     group_div: str,
-    rows: list[dict],
 ) -> None:
     """이름, 구분, 성별, 조직을 선택 연도의 srnch_members에 추가한다."""
     client = _member_client()
     today = date.today().isoformat()
-    payload = _member_payload(name, distinct, gender, group_div, rows)
+    payload = _member_payload(name, distinct, gender, group_div)
     payload["id"] = _next_member_id(client)
     payload["year"] = int(year)
     payload["created_at"] = today
@@ -618,10 +622,9 @@ def _update_member(
     distinct: str,
     gender: str,
     group_div: str,
-    rows: list[dict],
 ) -> None:
     """선택한 회원 한 명의 이름, 구분, 성별, 조직을 고친다."""
-    payload = _member_payload(name, distinct, gender, group_div, rows)
+    payload = _member_payload(name, distinct, gender, group_div)
     response = (
         _member_client()
         .table("srnch_members")
@@ -694,7 +697,7 @@ def _queue_member_selection(rows: list[dict], selected: list[int]) -> None:
     st.rerun()
 
 
-def _render_member_add(year: int, rows: list[dict]) -> None:
+def _render_member_add(year: int) -> None:
     """그리드와 조직 구분 사이의 회원 입력."""
     _apply_member_form()
     added = st.session_state.pop("member_added_msg", "")
@@ -755,9 +758,9 @@ def _render_member_add(year: int, rows: list[dict]) -> None:
     member_id = _as_int(st.session_state.get("member_selected_id"))
     try:
         if member_id is None:
-            _insert_member(int(year), name, distinct, gender, group_div, rows)
+            _insert_member(int(year), name, distinct, gender, group_div)
         else:
-            _update_member(int(year), member_id, name, distinct, gender, group_div, rows)
+            _update_member(int(year), member_id, name, distinct, gender, group_div)
     except Exception as exc:  # noqa: BLE001
         st.error(f"저장하지 못했습니다: {exc}")
         return
@@ -1003,7 +1006,7 @@ def render(*, force_refresh: bool = False) -> None:
             },
         )
         _queue_member_selection(indexed, list(selected_state.selection.rows))
-    _render_member_add(int(selected_year), indexed)
+    _render_member_add(int(selected_year))
     if indexed:
         _render_org_board(int(selected_year), indexed)
     _render_chat(indexed)
