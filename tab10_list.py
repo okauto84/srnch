@@ -23,6 +23,7 @@ VISIBLE_COLUMNS: tuple[tuple[str, str], ...] = (
     ("name_distinct", "구분"),
     ("gender", "성별"),
     ("children_group", "어린이 조직"),
+    ("children_group_div", "조직"),
     ("teacher_name", "담임 선생님"),
     ("birth_date", "생년월일"),
     ("age", "나이"),
@@ -66,6 +67,7 @@ COLUMN_WIDTHS = {
     "구분": 48,
     "성별": 48,
     "어린이 조직": 240,
+    "조직": 90,
     "담임 선생님": 90,
     "생년월일": 110,
     "나이": 48,
@@ -559,16 +561,28 @@ def _render_org_board(year: int, rows: list[dict]) -> None:
         return
 
     signature = _org_signature(year, spec)
-    spec["sig"] = signature
+    reset_token = int(st.session_state.get("org_reset_token", 0))
+    spec["sig"] = f"{signature}:{reset_token}"
     spec["error_nonce"] = str(st.session_state.get("org_error_nonce") or "")
-    event = _ORG_BOARD(spec=spec, key=f"org_board_{year}_{signature}", default=None)
-    if not isinstance(event, dict) or event.get("action") != "save":
+    event = _ORG_BOARD(
+        spec=spec,
+        key=f"org_board_{year}_{signature}_{reset_token}",
+        default=None,
+    )
+    if not isinstance(event, dict) or event.get("action") not in ("save", "reset"):
         return
     nonce = str(event.get("nonce") or "").strip()
     event_year = _as_int(event.get("year"))
     if not nonce or event_year != int(year):
         return
     if nonce == st.session_state.get("org_applied_nonce"):
+        return
+    if event.get("action") == "reset":
+        st.session_state["org_applied_nonce"] = nonce
+        st.session_state["org_error_nonce"] = ""
+        st.session_state["org_reset_token"] = reset_token + 1
+        clear_members_cache()
+        st.rerun()
         return
 
     try:

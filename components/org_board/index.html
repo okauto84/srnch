@@ -157,21 +157,35 @@
     }
     .hint { color: #6b7c8f; }
     .status { min-height: 1.1em; color: #3d6fbf; }
-    .save {
+    .actions {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .reset, .save {
       appearance: none;
-      border: 0;
-      background: #2563eb;
-      color: #fff;
       font: inherit;
       font-size: 14px;
       font-weight: 700;
-      padding: 8px 32px;
+      padding: 8px 28px;
       border-radius: 8px;
       cursor: pointer;
-      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+    }
+    .reset {
+      border: 1px solid #d5deea;
+      background: #fff;
+      color: #31445c;
+    }
+    .reset:hover { background: #f4f7fb; }
+    .save {
+      border: 0;
+      background: #2563eb;
+      color: #fff;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
     }
     .save:hover { background: #1d4ed8; }
-    .save:disabled { opacity: 0.55; cursor: progress; }
+    .reset:disabled, .save:disabled { opacity: 0.55; cursor: progress; }
     #delpop {
       position: fixed;
       z-index: 40;
@@ -196,13 +210,17 @@
     <div class="board-scroll" id="scroller"></div>
     <div class="footer">
       <p class="hint">반을 선택한 뒤 이름을 끌어 다른 반으로 옮기거나, 이름을 두 번 눌러 삭제합니다. 저장 전까지는 화면에만 반영됩니다.</p>
-      <button class="save" id="save" type="button">저장</button>
+      <div class="actions">
+        <button class="reset" id="reset" type="button">초기화</button>
+        <button class="save" id="save" type="button">저장</button>
+      </div>
       <p class="status" id="status"></p>
     </div>
   </div>
   <button id="delpop" type="button" hidden>삭제</button>
   <script>
     const scroller = document.getElementById("scroller");
+    const resetBtn = document.getElementById("reset");
     const saveBtn = document.getElementById("save");
     const statusEl = document.getElementById("status");
     const delpop = document.getElementById("delpop");
@@ -337,6 +355,7 @@
     function mount(spec) {
       cleanupDrag();
       hidePop();
+      resetBtn.disabled = false;
       saveBtn.disabled = false;
       window.clearTimeout(saveTimer);
       specYear = Number(spec.year) || 0;
@@ -542,6 +561,28 @@
       updateStatus();
     }
 
+    function newNonce() {
+      return (window.crypto && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : String(Date.now()) + "-" + Math.random().toString(16).slice(2);
+    }
+
+    function onReset() {
+      hidePop();
+      cleanupDrag();
+      resetBtn.disabled = true;
+      saveBtn.disabled = true;
+      statusEl.textContent = "초기화하는 중...";
+      post("streamlit:setComponentValue", {
+        dataType: "json",
+        value: {
+          action: "reset",
+          nonce: newNonce(),
+          year: specYear,
+        },
+      });
+    }
+
     function onSave() {
       const diff = changeSets();
       if (!diff.moves.length && !diff.deletes.length) {
@@ -552,19 +593,17 @@
       statusEl.textContent = "저장하는 중...";
       window.clearTimeout(saveTimer);
       saveTimer = window.setTimeout(function () {
+        resetBtn.disabled = false;
         saveBtn.disabled = false;
         if (statusEl.textContent === "저장하는 중...") {
           statusEl.textContent = "저장 응답이 없습니다. 다시 저장해 주세요.";
         }
       }, 12000);
-      const nonce = (window.crypto && crypto.randomUUID)
-        ? crypto.randomUUID()
-        : String(Date.now()) + "-" + Math.random().toString(16).slice(2);
       post("streamlit:setComponentValue", {
         dataType: "json",
         value: {
           action: "save",
-          nonce: nonce,
+          nonce: newNonce(),
           year: specYear,
           moves: diff.moves,
           deletes: diff.deletes,
@@ -583,12 +622,14 @@
       if (errorNonce && errorNonce !== seenError) {
         seenError = errorNonce;
         window.clearTimeout(saveTimer);
+        resetBtn.disabled = false;
         saveBtn.disabled = false;
         statusEl.textContent = "저장하지 못했습니다. 다시 저장해 주세요.";
       }
       requestAnimationFrame(fit);
     }
 
+    resetBtn.addEventListener("click", onReset);
     saveBtn.addEventListener("click", onSave);
     delpop.addEventListener("click", function (event) {
       event.stopPropagation();
