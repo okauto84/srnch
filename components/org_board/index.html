@@ -6,7 +6,6 @@
   <style>
     :root {
       --panel: transparent;
-      --sticky-mask: transparent;
       --line: #d7e3ef;
       --head: #f6f8fb;
       --dept: #fff6d4;
@@ -89,14 +88,6 @@
       border-color: #7eace0;
       box-shadow: 0 0 0 2px rgba(70, 130, 210, 0.28);
     }
-    .sticky-dept, .sticky-grade {
-      position: sticky;
-      z-index: 3;
-      box-shadow: var(--gap) 0 0 var(--sticky-mask);
-    }
-    .sticky-dept { left: 0; }
-    .sticky-grade { left: calc(var(--dept-w) + var(--gap)); }
-    .head.sticky-dept, .head.sticky-grade { z-index: 4; }
     .block-gap { height: 10px; }
     .names {
       width: 100%;
@@ -390,8 +381,8 @@
         place(head, column, 1);
         board.appendChild(head);
       }
-      addHead("부", 1, "sticky-dept");
-      addHead("학년", 2, "sticky-grade");
+      addHead("부", 1, "");
+      addHead("학년", 2, "");
       classes.forEach(function (klass, index) {
         addHead(klass + "반", 3 + index, "");
       });
@@ -408,13 +399,13 @@
         }
         const grades = block.grades || [];
         const dept = document.createElement("div");
-        dept.className = "dept sticky-dept";
+        dept.className = "dept";
         dept.textContent = String(block.dept);
         place(dept, 1, row, Math.max(grades.length, 1));
         board.appendChild(dept);
         grades.forEach(function (grade) {
           const gradeCell = document.createElement("div");
-          gradeCell.className = "grade sticky-grade";
+          gradeCell.className = "grade";
           gradeCell.textContent = String(grade);
           place(gradeCell, 2, row);
           board.appendChild(gradeCell);
@@ -614,10 +605,7 @@
       });
     }
 
-    function onRender(args, theme) {
-      if (theme && theme.backgroundColor) {
-        document.documentElement.style.setProperty("--sticky-mask", theme.backgroundColor);
-      }
+    function onRender(args) {
       const spec = args.spec || {};
       const sig = String(spec.sig || "");
       if (sig && sig !== builtSig) {
@@ -666,7 +654,7 @@
       if (event.source !== window.parent) return;
       const data = event.data;
       if (!data || data.type !== "streamlit:render") return;
-      onRender(data.args || {}, data.theme || null);
+      onRender(data.args || {});
     });
     post("streamlit:componentReady", { apiVersion: 1 });
     requestAnimationFrame(fit);

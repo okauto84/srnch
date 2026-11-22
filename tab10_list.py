@@ -535,6 +535,118 @@ def _apply_org_save(year: int, rows: list[dict], event: dict) -> tuple[int, int]
     return len(planned), len(delete_ids)
 
 
+_MEMBER_ADD_KEYS = (
+    "member_add_name",
+    "member_add_distinct",
+    "member_add_gender",
+    "member_add_div",
+)
+
+
+def _clear_member_add_form() -> None:
+    if not st.session_state.pop("member_add_clear", False):
+        return
+    for key in _MEMBER_ADD_KEYS:
+        st.session_state[key] = ""
+
+
+def _next_member_id(client) -> int:
+    response = (
+        client.table("srnch_members")
+        .select("id")
+        .order("id", desc=True)
+        .limit(1)
+        .execute()
+    )
+    rows = response.data or []
+    if not rows:
+        return 1
+    current = _as_int(rows[0].get("id"))
+    return (current or 0) + 1
+
+
+def _insert_member(
+    year: int,
+    name: str,
+    distinct: str,
+    gender: str,
+    group_div: str,
+    rows: list[dict],
+) -> None:
+    """이름, 구분, 성별, 조직을 선택 연도의 srnch_members에 추가한다."""
+    parsed = _parse_org_div(group_div)
+    if parsed is None:
+        raise ValueError("조직은 1-1-5 형식으로 입력하세요.")
+    dept, grade, klass = parsed
+    template = next(
+        (str(row.get("children_group") or "").strip() for row in rows if str(row.get("children_group") or "").strip()),
+        "",
+    )
+    today = date.today().isoformat()
+    client = create_client(
+        _supabase_url(_secret("SUPABASE_PROJECT")),
+        _secret("SUPABASE_KEY"),
+    )
+    payload = {
+        "id": _next_member_id(client),
+        "year": int(year),
+        "name": name,
+        "name_distinct": distinct or None,
+        "gender": gender or None,
+        "children_group_div": f"{dept}-{grade}-{klass}",
+        "children_group": _format_children_group(template, dept, grade, klass),
+        "created_at": today,
+        "updated_at": today,
+    }
+    client.table("srnch_members").insert(payload).execute()
+
+
+def _render_member_add(year: int, rows: list[dict]) -> None:
+    """그리드와 조직 구분 사이의 회원 추가 입력."""
+    _clear_member_add_form()
+    added = st.session_state.pop("member_added_msg", "")
+    if added:
+        st.success(added)
+
+    st.markdown('<span class="member-quick-add"></span>', unsafe_allow_html=True)
+    name_col, distinct_col, gender_col, div_col, save_col, _rest = st.columns(
+        [1.15, 0.65, 0.65, 1.05, 0.5, 3.4],
+        vertical_alignment="bottom",
+    )
+    with name_col:
+        name = st.text_input("이름", key="member_add_name")
+    with distinct_col:
+        distinct = st.text_input("구분", key="member_add_distinct")
+    with gender_col:
+        gender = st.text_input("성별", key="member_add_gender")
+    with div_col:
+        group_div = st.text_input("조직", placeholder="1-1-5", key="member_add_div")
+    with save_col:
+        submitted = st.button("저장", key="member_add_save_btn")
+
+    if not submitted:
+        return
+    name = name.strip()
+    distinct = distinct.strip()
+    gender = gender.strip()
+    group_div = group_div.strip()
+    if not name:
+        st.error("이름을 입력하세요.")
+        return
+    if not group_div:
+        st.error("조직을 입력하세요.")
+        return
+    try:
+        _insert_member(int(year), name, distinct, gender, group_div, rows)
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"저장하지 못했습니다: {exc}")
+        return
+    st.session_state["member_add_clear"] = True
+    st.session_state["member_added_msg"] = "회원을 저장했습니다."
+    clear_members_cache()
+    st.rerun()
+
+
 def _org_saved_text(moved: int, deleted: int) -> str:
     parts: list[str] = []
     if moved:
@@ -668,6 +780,32 @@ def render(*, force_refresh: bool = False) -> None:
         @keyframes member-chat-spin {
             to { transform: rotate(360deg); }
         }
+        [data-testid="stVerticalBlock"]:has(.member-quick-add) {
+            gap: 0.15rem;
+        }
+        [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stTextInput"] {
+            margin-bottom: 0;
+        }
+        [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stTextInput"] label {
+            font-size: 0.75rem;
+            min-height: 0;
+        }
+        [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stTextInput"] label p {
+            font-size: 0.75rem;
+        }
+        [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stTextInput"] input {
+            min-height: 1.65rem;
+            height: 1.65rem;
+            padding-top: 0.1rem;
+            padding-bottom: 0.1rem;
+            font-size: 0.82rem;
+        }
+        [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stButton"] button {
+            min-height: 1.65rem;
+            height: 1.65rem;
+            padding: 0 0.7rem;
+            font-size: 0.82rem;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -688,19 +826,19 @@ def render(*, force_refresh: bool = False) -> None:
     st.caption(f"총 {len(indexed)}건")
     if not indexed:
         st.info(f"{selected_year}년 표시할 회원이 없습니다.")
-        _render_chat(indexed)
-        return
-
-    st.dataframe(
-        _to_display_rows(indexed),
-        hide_index=True,
-        use_container_width=True,
-        height=GRID_ROW_HEIGHT * (min(len(indexed), VISIBLE_ROWS) + 1),
-        column_order=[label for _key, label in VISIBLE_COLUMNS],
-        column_config={
-            label: st.column_config.TextColumn(label, width=COLUMN_WIDTHS[label])
-            for _key, label in VISIBLE_COLUMNS
-        },
-    )
-    _render_org_board(int(selected_year), indexed)
+    else:
+        st.dataframe(
+            _to_display_rows(indexed),
+            hide_index=True,
+            use_container_width=True,
+            height=GRID_ROW_HEIGHT * (min(len(indexed), VISIBLE_ROWS) + 1),
+            column_order=[label for _key, label in VISIBLE_COLUMNS],
+            column_config={
+                label: st.column_config.TextColumn(label, width=COLUMN_WIDTHS[label])
+                for _key, label in VISIBLE_COLUMNS
+            },
+        )
+    _render_member_add(int(selected_year), indexed)
+    if indexed:
+        _render_org_board(int(selected_year), indexed)
     _render_chat(indexed)
