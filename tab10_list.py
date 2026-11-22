@@ -761,8 +761,17 @@ def _render_member_add(year: int) -> None:
         st.success(deleted_msg)
 
     st.markdown('<span class="member-quick-add"></span>', unsafe_allow_html=True)
-    name_col, distinct_col, gender_col, part_col, grade_col, class_col, action_col, _rest = st.columns(
-        [1.1, 0.55, 0.55, 0.5, 0.55, 0.5, 1.6, 1.6],
+    (
+        name_col,
+        distinct_col,
+        gender_col,
+        part_col,
+        grade_col,
+        class_col,
+        delete_col,
+        save_col,
+    ) = st.columns(
+        [1.1, 0.55, 0.55, 0.5, 0.55, 0.5, 0.85, 0.85],
         vertical_alignment="bottom",
         wrap=False,
     )
@@ -778,12 +787,10 @@ def _render_member_add(year: int) -> None:
         grade_text = st.text_input("학년", placeholder="2", key="member_add_grade")
     with class_col:
         class_text = st.text_input("반", placeholder="11", key="member_add_class")
-    with action_col:
-        delete_col, save_col = st.columns(2, gap="small", vertical_alignment="bottom", wrap=False)
-        with delete_col:
-            deleted = st.button("삭제", key="member_add_delete_btn", type="secondary")
-        with save_col:
-            submitted = st.button("저장", key="member_add_save_btn", type="primary")
+    with delete_col:
+        deleted = st.button("삭제", key="member_add_delete_btn", type="secondary")
+    with save_col:
+        submitted = st.button("저장", key="member_add_save_btn", type="primary")
 
     if deleted:
         member_id = _as_int(st.session_state.get("member_selected_id"))
@@ -996,15 +1003,22 @@ def render(*, force_refresh: bool = False) -> None:
             padding-bottom: 0.1rem;
             font-size: 0.82rem;
         }
-        [data-testid="stHorizontalBlock"]:has([data-testid="stBaseButton-secondary"]):not(:has([data-testid="stHorizontalBlock"])) {
-            width: fit-content !important;
-            flex: 0 0 auto !important;
-            gap: 0.35rem !important;
+        [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stHorizontalBlock"]:has([data-testid="stTextInput"]):has([data-testid="stBaseButton-secondary"]) {
+            flex-wrap: nowrap !important;
+            overflow-x: auto !important;
+            overflow-y: hidden !important;
+            width: 100% !important;
+            max-width: 100% !important;
         }
-        [data-testid="stHorizontalBlock"]:has([data-testid="stBaseButton-secondary"]):not(:has([data-testid="stHorizontalBlock"])) > [data-testid="stColumn"] {
-            width: auto !important;
+        [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stHorizontalBlock"]:has([data-testid="stTextInput"]):has([data-testid="stBaseButton-secondary"]) > [data-testid="stColumn"] {
             flex: 0 0 auto !important;
-            min-width: 0 !important;
+            width: auto !important;
+            min-width: max-content !important;
+            max-width: none !important;
+            overflow: visible !important;
+        }
+        [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stTextInput"] {
+            min-width: 4.75rem;
         }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stButton"] button {
             min-height: 0;
@@ -1014,6 +1028,7 @@ def render(*, force_refresh: bool = False) -> None:
             font-size: 14px;
             font-weight: 700;
             line-height: 1.2;
+            white-space: nowrap;
         }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stBaseButton-primary"] {
             border: 0 !important;
