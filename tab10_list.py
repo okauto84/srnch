@@ -543,13 +543,6 @@ _MEMBER_ADD_KEYS = (
 )
 
 
-def _clear_member_add_form() -> None:
-    if not st.session_state.pop("member_add_clear", False):
-        return
-    for key in _MEMBER_ADD_KEYS:
-        st.session_state[key] = ""
-
-
 def _next_member_id(client) -> int:
     response = (
         client.table("srnch_members")
@@ -565,6 +558,41 @@ def _next_member_id(client) -> int:
     return (current or 0) + 1
 
 
+def _member_client():
+    return create_client(
+        _supabase_url(_secret("SUPABASE_PROJECT")),
+        _secret("SUPABASE_KEY"),
+    )
+
+
+def _member_group_fields(group_div: str, rows: list[dict]) -> tuple[str, str]:
+    parsed = _parse_org_div(group_div)
+    if parsed is None:
+        raise ValueError("조직은 1-1-5 형식으로 입력하세요.")
+    dept, grade, klass = parsed
+    template = next(
+        (
+            str(row.get("children_group") or "").strip()
+            for row in rows
+            if str(row.get("children_group") or "").strip()
+        ),
+        "",
+    )
+    return f"{dept}-{grade}-{klass}", _format_children_group(template, dept, grade, klass)
+
+
+def _member_payload(name: str, distinct: str, gender: str, group_div: str, rows: list[dict]) -> dict:
+    children_group_div, children_group = _member_group_fields(group_div, rows)
+    return {
+        "name": name,
+        "name_distinct": distinct or None,
+        "gender": gender or None,
+        "children_group_div": children_group_div,
+        "children_group": children_group,
+        "updated_at": date.today().isoformat(),
+    }
+
+
 def _insert_member(
     year: int,
     name: str,
@@ -574,43 +602,111 @@ def _insert_member(
     rows: list[dict],
 ) -> None:
     """이름, 구분, 성별, 조직을 선택 연도의 srnch_members에 추가한다."""
-    parsed = _parse_org_div(group_div)
-    if parsed is None:
-        raise ValueError("조직은 1-1-5 형식으로 입력하세요.")
-    dept, grade, klass = parsed
-    template = next(
-        (str(row.get("children_group") or "").strip() for row in rows if str(row.get("children_group") or "").strip()),
-        "",
-    )
+    client = _member_client()
     today = date.today().isoformat()
-    client = create_client(
-        _supabase_url(_secret("SUPABASE_PROJECT")),
-        _secret("SUPABASE_KEY"),
-    )
-    payload = {
-        "id": _next_member_id(client),
-        "year": int(year),
-        "name": name,
-        "name_distinct": distinct or None,
-        "gender": gender or None,
-        "children_group_div": f"{dept}-{grade}-{klass}",
-        "children_group": _format_children_group(template, dept, grade, klass),
-        "created_at": today,
-        "updated_at": today,
-    }
+    payload = _member_payload(name, distinct, gender, group_div, rows)
+    payload["id"] = _next_member_id(client)
+    payload["year"] = int(year)
+    payload["created_at"] = today
     client.table("srnch_members").insert(payload).execute()
 
 
+def _update_member(
+    year: int,
+    member_id: int,
+    name: str,
+    distinct: str,
+    gender: str,
+    group_div: str,
+    rows: list[dict],
+) -> None:
+    """선택한 회원 한 명의 이름, 구분, 성별, 조직을 고친다."""
+    payload = _member_payload(name, distinct, gender, group_div, rows)
+    response = (
+        _member_client()
+        .table("srnch_members")
+        .update(payload)
+        .eq("id", member_id)
+        .eq("year", int(year))
+        .execute()
+    )
+    if not response.data:
+        raise LookupError("수정할 회원을 찾지 못했습니다.")
+
+
+def _delete_member(year: int, member_id: int) -> None:
+    """선택한 회원 한 명을 srnch_members에서 지운다."""
+    response = (
+        _member_client()
+        .table("srnch_members")
+        .delete()
+        .eq("id", member_id)
+        .eq("year", int(year))
+        .execute()
+    )
+    if not response.data:
+        raise LookupError("삭제할 회원을 찾지 못했습니다.")
+
+
+def _field_text(value: object) -> str:
+    return "" if value is None else str(value)
+
+
+def _apply_member_form() -> None:
+    """선택 행을 입력 칸이 그려지기 전에 반영한다."""
+    if st.session_state.pop("member_add_clear", False):
+        for key in _MEMBER_ADD_KEYS:
+            st.session_state[key] = ""
+        st.session_state.pop("member_selected_id", None)
+        st.session_state.pop("member_loaded_id", None)
+        return
+    fill = st.session_state.pop("member_pending_fill", None)
+    if not fill:
+        return
+    st.session_state["member_add_name"] = fill["name"]
+    st.session_state["member_add_distinct"] = fill["distinct"]
+    st.session_state["member_add_gender"] = fill["gender"]
+    st.session_state["member_add_div"] = fill["div"]
+    st.session_state["member_selected_id"] = fill["id"]
+
+
+def _queue_member_selection(rows: list[dict], selected: list[int]) -> None:
+    """고른 행이 바뀌면 입력 칸에 넣기 위해 한 번 더 그린다."""
+    if st.session_state.pop("member_ignore_selection", False):
+        return
+    if not selected:
+        return
+    index = selected[0]
+    if index < 0 or index >= len(rows):
+        return
+    row = rows[index]
+    member_id = _as_int(row.get("id"))
+    if member_id is None or member_id == st.session_state.get("member_loaded_id"):
+        return
+    st.session_state["member_loaded_id"] = member_id
+    st.session_state["member_pending_fill"] = {
+        "id": member_id,
+        "name": _field_text(row.get("name")).strip(),
+        "distinct": _field_text(row.get("name_distinct")).strip(),
+        "gender": _field_text(row.get("gender")).strip(),
+        "div": _field_text(row.get("children_group_div")).strip(),
+    }
+    st.rerun()
+
+
 def _render_member_add(year: int, rows: list[dict]) -> None:
-    """그리드와 조직 구분 사이의 회원 추가 입력."""
-    _clear_member_add_form()
+    """그리드와 조직 구분 사이의 회원 입력."""
+    _apply_member_form()
     added = st.session_state.pop("member_added_msg", "")
+    deleted_msg = st.session_state.pop("member_deleted_msg", "")
     if added:
         st.success(added)
+    if deleted_msg:
+        st.success(deleted_msg)
 
     st.markdown('<span class="member-quick-add"></span>', unsafe_allow_html=True)
-    name_col, distinct_col, gender_col, div_col, save_col, _rest = st.columns(
-        [1.15, 0.65, 0.65, 1.05, 0.5, 3.4],
+    name_col, distinct_col, gender_col, div_col, delete_col, save_col, _rest = st.columns(
+        [1.1, 0.6, 0.6, 1.0, 0.72, 0.72, 2.5],
         vertical_alignment="bottom",
     )
     with name_col:
@@ -621,8 +717,28 @@ def _render_member_add(year: int, rows: list[dict]) -> None:
         gender = st.text_input("성별", key="member_add_gender")
     with div_col:
         group_div = st.text_input("조직", placeholder="1-1-5", key="member_add_div")
+    with delete_col:
+        deleted = st.button("삭제", key="member_add_delete_btn", type="secondary")
     with save_col:
-        submitted = st.button("저장", key="member_add_save_btn")
+        submitted = st.button("저장", key="member_add_save_btn", type="primary")
+
+    if deleted:
+        member_id = _as_int(st.session_state.get("member_selected_id"))
+        if member_id is None:
+            st.error("그리드에서 삭제할 회원을 선택하세요.")
+            return
+        try:
+            _delete_member(int(year), member_id)
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"삭제하지 못했습니다: {exc}")
+            return
+        st.session_state["member_add_clear"] = True
+        st.session_state["member_grid_generation"] = (
+            int(st.session_state.get("member_grid_generation", 0)) + 1
+        )
+        st.session_state["member_deleted_msg"] = "회원을 삭제했습니다."
+        clear_members_cache()
+        st.rerun()
 
     if not submitted:
         return
@@ -636,13 +752,22 @@ def _render_member_add(year: int, rows: list[dict]) -> None:
     if not group_div:
         st.error("조직을 입력하세요.")
         return
+    member_id = _as_int(st.session_state.get("member_selected_id"))
     try:
-        _insert_member(int(year), name, distinct, gender, group_div, rows)
+        if member_id is None:
+            _insert_member(int(year), name, distinct, gender, group_div, rows)
+        else:
+            _update_member(int(year), member_id, name, distinct, gender, group_div, rows)
     except Exception as exc:  # noqa: BLE001
         st.error(f"저장하지 못했습니다: {exc}")
         return
-    st.session_state["member_add_clear"] = True
-    st.session_state["member_added_msg"] = "회원을 저장했습니다."
+    if member_id is None:
+        st.session_state["member_add_clear"] = True
+        st.session_state["member_added_msg"] = "회원을 저장했습니다."
+    else:
+        st.session_state["member_loaded_id"] = member_id
+        st.session_state["member_ignore_selection"] = True
+        st.session_state["member_added_msg"] = "회원을 수정했습니다."
     clear_members_cache()
     st.rerun()
 
@@ -801,10 +926,45 @@ def render(*, force_refresh: bool = False) -> None:
             font-size: 0.82rem;
         }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stButton"] button {
-            min-height: 1.65rem;
-            height: 1.65rem;
-            padding: 0 0.7rem;
-            font-size: 0.82rem;
+            min-height: 0;
+            height: auto;
+            padding: 8px 28px;
+            border-radius: 8px !important;
+            font-size: 14px;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+        [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stBaseButton-primary"] {
+            border: 0 !important;
+            background: #2563eb !important;
+            color: #fff !important;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+        }
+        [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stBaseButton-primary"]:hover {
+            background: #1d4ed8 !important;
+            color: #fff !important;
+            border: 0 !important;
+        }
+        [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stBaseButton-primary"] p {
+            font-size: 14px;
+            font-weight: 700;
+            color: #fff;
+        }
+        [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stBaseButton-secondary"] {
+            border: 1px solid #b42318 !important;
+            background: #fff !important;
+            color: #b42318 !important;
+            box-shadow: none;
+        }
+        [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stBaseButton-secondary"]:hover {
+            background: #fff5f5 !important;
+            color: #b42318 !important;
+            border: 1px solid #b42318 !important;
+        }
+        [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stBaseButton-secondary"] p {
+            font-size: 14px;
+            font-weight: 700;
+            color: #b42318;
         }
         </style>
         """,
@@ -827,17 +987,22 @@ def render(*, force_refresh: bool = False) -> None:
     if not indexed:
         st.info(f"{selected_year}년 표시할 회원이 없습니다.")
     else:
-        st.dataframe(
+        generation = int(st.session_state.get("member_grid_generation", 0))
+        selected_state = st.dataframe(
             _to_display_rows(indexed),
             hide_index=True,
             use_container_width=True,
             height=GRID_ROW_HEIGHT * (min(len(indexed), VISIBLE_ROWS) + 1),
             column_order=[label for _key, label in VISIBLE_COLUMNS],
+            on_select="rerun",
+            selection_mode="single-row",
+            key=f"member_grid_{selected_year}_{generation}",
             column_config={
                 label: st.column_config.TextColumn(label, width=COLUMN_WIDTHS[label])
                 for _key, label in VISIBLE_COLUMNS
             },
         )
+        _queue_member_selection(indexed, list(selected_state.selection.rows))
     _render_member_add(int(selected_year), indexed)
     if indexed:
         _render_org_board(int(selected_year), indexed)
