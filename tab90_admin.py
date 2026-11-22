@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
+import sys
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
@@ -12,8 +16,6 @@ import requests
 import streamlit as st
 import urllib3
 from supabase import Client, create_client
-
-import batch2027
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -442,6 +444,30 @@ def _missing_secrets(names: tuple[str, ...]) -> list[str]:
     return missing
 
 
+def _run_data_batch() -> str:
+    """프로젝트 data/batch2027.py를 실행하고 출력 내용을 돌려준다."""
+    script = Path(__file__).resolve().parent / "data" / "batch2027.py"
+    if not script.is_file():
+        raise FileNotFoundError(f"배치 스크립트가 없습니다: {script}")
+    env = os.environ.copy()
+    env["SUPABASE_PROJECT"] = _secret("SUPABASE_PROJECT")
+    env["SUPABASE_KEY"] = _secret("SUPABASE_KEY")
+    env["PYTHONIOENCODING"] = "utf-8"
+    completed = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=str(script.parent),
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "").strip()
+        raise RuntimeError(detail or f"종료 코드 {completed.returncode}")
+    return completed.stdout.strip()
+
+
 def render() -> None:
     st.subheader("관리")
     st.caption("디모데 회원 목록을 수집하여 Supabase `srnch_members`에 적재합니다.")
@@ -478,9 +504,9 @@ def render() -> None:
                 st.dataframe(preview, use_container_width=True)
 
     if batch_clicked:
-        with st.spinner("data 폴더 명단을 재배치해 넣는 중..."):
+        with st.spinner("data/batch2027.py 실행 중..."):
             try:
-                report = batch2027.run_batch(client=_get_supabase())
+                report = _run_data_batch()
             except Exception as exc:  # noqa: BLE001
                 st.error(f"batch2027 실패: {exc}")
                 return
