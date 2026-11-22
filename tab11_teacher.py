@@ -621,6 +621,47 @@ def _queue_selected_row(rows: list[dict], selected: list[int]) -> None:
 def render() -> None:
     """담임 정보 입력과 연도별 목록."""
     _apply_form_overrides()
+
+    version = int(st.session_state.get("teacher_data_version", 0))
+    year_options = _list_year_options()
+    if st.session_state.get("teacher_list_year") not in year_options:
+        st.session_state["teacher_list_year"] = year_options[0]
+
+    year_col, copy_col, _ = st.columns([1, 1.2, 3.8], vertical_alignment="bottom")
+    with year_col:
+        selected_year = st.selectbox(
+            "연도",
+            options=year_options,
+            key="teacher_list_year",
+        )
+    with copy_col:
+        copy_clicked = st.button(
+            "내년도 복사",
+            use_container_width=True,
+            key="teacher_copy_next_year_btn",
+        )
+
+    if copy_clicked:
+        if _handle_copy_next_year(int(selected_year)):
+            st.rerun()
+
+    copied_msg = st.session_state.pop("teacher_copied_msg", None)
+    if copied_msg:
+        copied = int(copied_msg["copied"])
+        skipped = int(copied_msg["skipped"])
+        source_year = int(copied_msg["source_year"])
+        target_year = int(copied_msg["target_year"])
+        if copied > 0:
+            msg = f"{source_year}년 → {target_year}년으로 {copied}건 복사했습니다."
+            if skipped:
+                msg += f" (이미 있어 건너뜀 {skipped}건)"
+            st.success(msg)
+        else:
+            st.info(
+                f"{target_year}년에 이미 같은 담임이 있어 새로 복사한 건이 없습니다."
+                f" (건너뜀 {skipped}건)"
+            )
+
     st.markdown("**담임 정보**")
     col_year, col_part, col_grade, col_class, col_name, col_phone = st.columns(
         [1, 0.7, 0.7, 0.7, 1.2, 1.6], vertical_alignment="bottom"
@@ -666,45 +707,6 @@ def render() -> None:
         st.success("저장했습니다.")
     if st.session_state.pop("teacher_deleted_msg", False):
         st.success("삭제했습니다.")
-    copied_msg = st.session_state.pop("teacher_copied_msg", None)
-    if copied_msg:
-        copied = int(copied_msg["copied"])
-        skipped = int(copied_msg["skipped"])
-        source_year = int(copied_msg["source_year"])
-        target_year = int(copied_msg["target_year"])
-        if copied > 0:
-            msg = f"{source_year}년 → {target_year}년으로 {copied}건 복사했습니다."
-            if skipped:
-                msg += f" (이미 있어 건너뜀 {skipped}건)"
-            st.success(msg)
-        else:
-            st.info(
-                f"{target_year}년에 이미 같은 담임이 있어 새로 복사한 건이 없습니다."
-                f" (건너뜀 {skipped}건)"
-            )
-
-    version = int(st.session_state.get("teacher_data_version", 0))
-    year_options = _list_year_options()
-    if st.session_state.get("teacher_list_year") not in year_options:
-        st.session_state["teacher_list_year"] = year_options[0]
-
-    year_col, copy_col, _ = st.columns([1, 1.2, 3.8], vertical_alignment="bottom")
-    with year_col:
-        selected_year = st.selectbox(
-            "연도",
-            options=year_options,
-            key="teacher_list_year",
-        )
-    with copy_col:
-        copy_clicked = st.button(
-            "내년도 복사",
-            use_container_width=True,
-            key="teacher_copy_next_year_btn",
-        )
-
-    if copy_clicked:
-        if _handle_copy_next_year(int(selected_year)):
-            st.rerun()
 
     try:
         rows = _fetch_teachers(int(selected_year), version)
