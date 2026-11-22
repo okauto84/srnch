@@ -20,7 +20,9 @@ MEMBER_FIELDS = (
     "name",
     "name_distinct",
     "children_group",
-    "children_group_div",
+    "part",
+    "grade",
+    "class",
     "member_type1",
     "member_type2",
     "birth_date",
@@ -184,16 +186,20 @@ def _children_group_category(app_js: str) -> str:
     return "extended2"
 
 
-def normalize_children_group(value: str | None) -> str | None:
-    """유년1부-2학년-01반, '03.유년 - 유년1부 - 2학년 - 05반' → '1-2-1'."""
+def split_children_group(value: str | None) -> tuple[int | None, int | None, int | None]:
+    """어린이 조직 문구에서 부, 학년, 반을 읽는다.
+
+    03. 유년-유년2부-2학년-11반 → part=2, grade=2, class=11
+    03. 유년-유년1부-1학년-5반 → part=1, grade=1, class=5
+    """
     if not value:
-        return None
+        return None, None, None
     dept = re.search(r"유년\s*(\d+)\s*부", value)
     grade = re.search(r"(\d+)\s*학년", value)
     klass = re.search(r"(\d+)\s*반", value)
     if not (dept and grade and klass):
-        return None
-    return f"{int(dept.group(1))}-{int(grade.group(1))}-{int(klass.group(1))}"
+        return None, None, None
+    return int(dept.group(1)), int(grade.group(1)), int(klass.group(1))
 
 
 def _first_text(row: dict[str, Any], *keys: str) -> str | None:
@@ -212,6 +218,7 @@ def map_person_row(row: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
     children_group = _first_text(row, "group", "group1", "group2", "mission", "mission1")
+    part, grade, klass = split_children_group(children_group)
     jibeon_address = _first_text(row, "addrDongAddr", "addrRoadAddr")
     if not jibeon_address:
         parts = [
@@ -227,7 +234,9 @@ def map_person_row(row: dict[str, Any]) -> dict[str, Any] | None:
         "name": name,
         "name_distinct": _as_text(row.get("nameDistinct")),
         "children_group": children_group,
-        "children_group_div": normalize_children_group(children_group),
+        "part": part,
+        "grade": grade,
+        "class": klass,
         "member_type1": _first_text(row, "state1", "status"),
         "member_type2": _as_text(row.get("state2")),
         "birth_date": _parse_date(row.get("birthDate")),

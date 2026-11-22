@@ -1,6 +1,6 @@
 -- 2027년 학생 명단.xlsx -> srnch_members
--- children_group_div: 유치N부 -> N, 믿음(학년 숫자 없음) -> 1, NN반 -> N
--- 예: 04.유치 유치1부 믿음 01반 -> 1-1-1
+-- part, grade, class: 유치N부 -> part, 믿음(학년 숫자 없음) -> grade 1, NN반 -> class
+-- 예: 04.유치 유치1부 믿음 01반 -> part=1, grade=1, class=1
 -- 다시 실행하면 year = 2027 행을 지운 뒤 다시 넣는다. 다른 연도는 유지한다.
 
 BEGIN;
@@ -136,7 +136,9 @@ INSERT INTO srnch_members (
   name,
   name_distinct,
   children_group,
-  children_group_div,
+  part,
+  grade,
+  class,
   created_at,
   updated_at
 )
@@ -146,7 +148,9 @@ SELECT
   src.name,
   src.name_distinct,
   src.children_group,
-  src.children_group_div,
+  split_part(src.children_group_div, '-', 1)::int,
+  split_part(src.children_group_div, '-', 2)::int,
+  split_part(src.children_group_div, '-', 3)::int,
   CURRENT_DATE,
   CURRENT_DATE
 FROM src

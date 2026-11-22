@@ -8,18 +8,22 @@ from datetime import date
 import streamlit as st
 from supabase import create_client
 
-GROUP_DIV_RE = re.compile(r"^[0-9]+-[0-9]+-[0-9]+$")
+_LEGACY_GROUP_RE = re.compile(r"^(\d+)-(\d+)-(\d+)$")
 YEAR_OPTIONS = (2026, 2027)
 GRID_COLUMNS = (
     ("year", "연도"),
-    ("children_group_div", "조직"),
+    ("part", "부"),
+    ("grade", "학년"),
+    ("class", "반"),
     ("teacher_name", "이름"),
     ("phone", "연락처"),
     ("address", "주소"),
 )
 COLUMN_WIDTHS = {
     "연도": 80,
-    "조직": 110,
+    "부": 56,
+    "학년": 56,
+    "반": 56,
     "이름": 110,
     "연락처": 140,
     "주소": 280,
@@ -44,29 +48,48 @@ def _supabase_url(project: str) -> str:
     return f"https://{project}.supabase.co"
 
 
-# srnch_teacher 기본 키. 이 세 값이 모두 맞을 때만 한 행을 고치거나 지운다.
-TEACHER_KEY_FIELDS = ("year", "teacher_name", "children_group_div")
-TEACHER_KEY_SELECT = "year,teacher_name,children_group_div"
+# srnch_teacher 기본 키. 이 값이 모두 맞을 때만 한 행을 고치거나 지운다.
+TEACHER_KEY_FIELDS = ("year", "teacher_name", "part", "grade", "class")
+TEACHER_KEY_SELECT = "year,teacher_name,part,grade,class"
 
 
 def _client():
     return create_client(_supabase_url(_secret("SUPABASE_PROJECT")), _secret("SUPABASE_KEY"))
 
 
-def _make_teacher_key(year: int, teacher_name: str, children_group_div: str) -> dict:
+def _parse_positive_int(value: object) -> int | None:
+    """1 이상의 정수만 받는다. 01은 1로 본다."""
+    text = str(value if value is not None else "").strip()
+    if not text.isdigit():
+        return None
+    number = int(text)
+    if number < 1:
+        return None
+    return number
+
+
+def _make_teacher_key(
+    year: int,
+    teacher_name: str,
+    part: object,
+    grade: object,
+    klass: object,
+) -> dict:
     """기본 키를 정규화한다. 하나라도 비면 거부한다."""
     name = str(teacher_name).strip()
-    group = str(children_group_div).strip()
     if not isinstance(year, int):
         year = int(year)
-    if not name or not group:
-        raise ValueError("담임 키(year, teacher_name, children_group_div)가 완전하지 않습니다.")
-    if not GROUP_DIV_RE.fullmatch(group):
-        raise ValueError("조직은 1-1-5 형식으로 입력하세요.")
+    part_n = _parse_positive_int(part)
+    grade_n = _parse_positive_int(grade)
+    class_n = _parse_positive_int(klass)
+    if not name or part_n is None or grade_n is None or class_n is None:
+        raise ValueError("담임 키(year, teacher_name, part, grade, class)가 완전하지 않습니다.")
     return {
         "year": year,
         "teacher_name": name,
-        "children_group_div": group,
+        "part": part_n,
+        "grade": grade_n,
+        "class": class_n,
     }
 
 
@@ -74,15 +97,24 @@ def _as_teacher_key(raw: dict | None) -> dict:
     """세션/선택 값에서 기본 키만 뽑아 검증한다."""
     if not raw:
         raise ValueError("담임 키가 없습니다.")
-    missing = [field for field in TEACHER_KEY_FIELDS if raw.get(field) in (None, "")]
+    source = dict(raw)
+    if any(source.get(field) in (None, "") for field in ("part", "grade", "class")):
+        match = _LEGACY_GROUP_RE.fullmatch(str(source.get("children_group_div") or "").strip())
+        if match:
+            source["part"], source["grade"], source["class"] = (
+                int(part) for part in match.groups()
+            )
+    missing = [field for field in TEACHER_KEY_FIELDS if source.get(field) in (None, "")]
     if missing:
         raise ValueError(
             "담임 키가 완전하지 않습니다: " + ", ".join(missing)
         )
     return _make_teacher_key(
-        int(raw["year"]),
-        str(raw["teacher_name"]),
-        str(raw["children_group_div"]),
+        int(source["year"]),
+        str(source["teacher_name"]),
+        source["part"],
+        source["grade"],
+        source["class"],
     )
 
 
@@ -92,7 +124,9 @@ def _filter_by_teacher_key(query, key: dict):
     return (
         query.eq("year", key["year"])
         .eq("teacher_name", key["teacher_name"])
-        .eq("children_group_div", key["children_group_div"])
+        .eq("part", key["part"])
+        .eq("grade", key["grade"])
+        .eq("class", key["class"])
     )
 
 
@@ -102,7 +136,7 @@ def _require_one_row(rows: list | None, action: str) -> dict:
     if len(rows) != 1:
         raise RuntimeError(
             f"{action} 대상이 {len(rows)}건입니다. "
-            "year, teacher_name, children_group_div 키가 한 행만 가리켜야 합니다."
+            "year, teacher_name, part, grade, class 키가 한 행만 가리켜야 합니다."
         )
     return rows[0]
 
@@ -127,12 +161,14 @@ def _today() -> str:
 
 def _teacher_payload(
     year: int,
-    children_group_div: str,
+    part: object,
+    grade: object,
+    klass: object,
     teacher_name: str,
     phone: str,
     address: str,
 ) -> dict:
-    key = _make_teacher_key(year, teacher_name, children_group_div)
+    key = _make_teacher_key(year, teacher_name, part, grade, klass)
     return {
         **key,
         "phone": phone or None,
@@ -142,14 +178,16 @@ def _teacher_payload(
 
 def _save_teacher(
     year: int,
-    children_group_div: str,
+    part: object,
+    grade: object,
+    klass: object,
     teacher_name: str,
     phone: str,
     address: str,
 ) -> None:
-    """연도, 조직, 이름, 연락처, 주소를 srnch_teacher에 새로 저장한다."""
+    """연도, 부, 학년, 반, 이름, 연락처, 주소를 srnch_teacher에 새로 저장한다."""
     today = _today()
-    payload = _teacher_payload(year, children_group_div, teacher_name, phone, address)
+    payload = _teacher_payload(year, part, grade, klass, teacher_name, phone, address)
     payload["created_at"] = today
     payload["updated_at"] = today
     _client().table("srnch_teacher").insert(payload).execute()
@@ -158,14 +196,16 @@ def _save_teacher(
 def _update_teacher(
     edit_key: dict,
     year: int,
-    children_group_div: str,
+    part: object,
+    grade: object,
+    klass: object,
     teacher_name: str,
     phone: str,
     address: str,
 ) -> None:
-    """선택한 행만, 기본 키 세 조건으로 고친다."""
+    """선택한 행만, 기본 키 조건으로 고친다."""
     old_key = _as_teacher_key(edit_key)
-    new_key = _make_teacher_key(year, teacher_name, children_group_div)
+    new_key = _make_teacher_key(year, teacher_name, part, grade, klass)
     if old_key == new_key:
         # 키가 같으면 연락처·주소만 바꿔 다른 행 키를 건드리지 않는다.
         payload = {
@@ -174,7 +214,7 @@ def _update_teacher(
             "updated_at": _today(),
         }
     else:
-        payload = _teacher_payload(year, children_group_div, teacher_name, phone, address)
+        payload = _teacher_payload(year, part, grade, klass, teacher_name, phone, address)
         payload["updated_at"] = _today()
 
     response = _filter_by_teacher_key(
@@ -199,9 +239,11 @@ def _fetch_teachers(year: int, _version: int) -> list[dict]:
     response = (
         _client()
         .table("srnch_teacher")
-        .select("year,children_group_div,teacher_name,phone,address")
+        .select("year,part,grade,class,teacher_name,phone,address")
         .eq("year", year)
-        .order("children_group_div")
+        .order("part")
+        .order("grade")
+        .order("class")
         .order("teacher_name")
         .execute()
     )
@@ -218,7 +260,7 @@ def _copy_teachers_to_next_year(source_year: int) -> tuple[int, int, int]:
     client = _client()
     source_rows = (
         client.table("srnch_teacher")
-        .select("children_group_div,teacher_name,phone,address")
+        .select("part,grade,class,teacher_name,phone,address")
         .eq("year", source_year)
         .execute()
     ).data or []
@@ -227,12 +269,17 @@ def _copy_teachers_to_next_year(source_year: int) -> tuple[int, int, int]:
 
     existing_rows = (
         client.table("srnch_teacher")
-        .select("teacher_name,children_group_div")
+        .select("teacher_name,part,grade,class")
         .eq("year", target_year)
         .execute()
     ).data or []
     existing_keys = {
-        (str(row.get("teacher_name") or ""), str(row.get("children_group_div") or ""))
+        (
+            str(row.get("teacher_name") or ""),
+            _parse_positive_int(row.get("part")),
+            _parse_positive_int(row.get("grade")),
+            _parse_positive_int(row.get("class")),
+        )
         for row in existing_rows
     }
 
@@ -241,18 +288,22 @@ def _copy_teachers_to_next_year(source_year: int) -> tuple[int, int, int]:
     skipped = 0
     for row in source_rows:
         name = str(row.get("teacher_name") or "").strip()
-        group = str(row.get("children_group_div") or "").strip()
-        if not name or not group:
+        part = _parse_positive_int(row.get("part"))
+        grade = _parse_positive_int(row.get("grade"))
+        klass = _parse_positive_int(row.get("class"))
+        if not name or part is None or grade is None or klass is None:
             skipped += 1
             continue
-        if (name, group) in existing_keys:
+        if (name, part, grade, klass) in existing_keys:
             skipped += 1
             continue
         payloads.append(
             {
                 "year": target_year,
                 "teacher_name": name,
-                "children_group_div": group,
+                "part": part,
+                "grade": grade,
+                "class": klass,
                 "phone": row.get("phone"),
                 "address": row.get("address"),
                 "created_at": today,
@@ -318,25 +369,29 @@ def _remember_saved(key: dict) -> None:
     st.session_state["teacher_edit_key"] = key
     st.session_state["teacher_loaded_sig"] = (
         str(key["year"]),
-        key["children_group_div"],
+        str(key["part"]),
+        str(key["grade"]),
+        str(key["class"]),
         key["teacher_name"],
     )
 
 
 def _handle_save(
     year_text: str,
-    group_text: str,
+    part_text: str,
+    grade_text: str,
+    class_text: str,
     name_text: str,
     phone_text: str,
     address_text: str,
 ) -> int | None:
     phone_text = phone_text.strip()
     address_text = address_text.strip()
-    parsed = _parse_teacher_key(year_text, group_text, name_text)
+    parsed = _parse_teacher_key(year_text, part_text, grade_text, class_text, name_text)
     if parsed is None:
         return None
-    year, group_text, name_text = parsed
-    new_key = _make_teacher_key(year, name_text, group_text)
+    year, part, grade, klass, name_text = parsed
+    new_key = _make_teacher_key(year, name_text, part, grade, klass)
 
     edit_raw = st.session_state.get("teacher_edit_key")
     try:
@@ -348,7 +403,9 @@ def _handle_save(
             _update_teacher(
                 edit_key,
                 new_key["year"],
-                new_key["children_group_div"],
+                new_key["part"],
+                new_key["grade"],
+                new_key["class"],
                 new_key["teacher_name"],
                 phone_text,
                 address_text,
@@ -357,12 +414,14 @@ def _handle_save(
             if _teacher_exists(new_key):
                 _alert(
                     "이미 같은 데이터가 있습니다: "
-                    f"{new_key['year']} / {new_key['children_group_div']} / {new_key['teacher_name']}"
+                    f"{new_key['year']} / {new_key['part']}부 {new_key['grade']}학년 {new_key['class']}반 / {new_key['teacher_name']}"
                 )
                 return None
             _save_teacher(
                 new_key["year"],
-                new_key["children_group_div"],
+                new_key["part"],
+                new_key["grade"],
+                new_key["class"],
                 new_key["teacher_name"],
                 phone_text,
                 address_text,
@@ -377,7 +436,9 @@ def _handle_save(
 
 _INPUT_KEYS = (
     "teacher_input_year",
-    "teacher_input_group",
+    "teacher_input_part",
+    "teacher_input_grade",
+    "teacher_input_class",
     "teacher_input_name",
     "teacher_input_phone",
     "teacher_input_address",
@@ -433,14 +494,26 @@ def _refresh_teacher_list(year: int | None = None) -> None:
 
 
 def _parse_teacher_key(
-    year_text: str, group_text: str, name_text: str
-) -> tuple[int, str, str] | None:
+    year_text: str,
+    part_text: str,
+    grade_text: str,
+    class_text: str,
+    name_text: str,
+) -> tuple[int, int, int, int, str] | None:
     year_text = year_text.strip()
-    group_text = group_text.strip()
+    part_text = part_text.strip()
+    grade_text = grade_text.strip()
+    class_text = class_text.strip()
     name_text = name_text.strip()
     missing = [
         label
-        for label, value in (("연도", year_text), ("조직", group_text), ("이름", name_text))
+        for label, value in (
+            ("연도", year_text),
+            ("부", part_text),
+            ("학년", grade_text),
+            ("반", class_text),
+            ("이름", name_text),
+        )
         if not value
     ]
     if missing:
@@ -454,13 +527,22 @@ def _parse_teacher_key(
     if not 2000 <= year <= 2100:
         _alert("연도는 2000년부터 2100년까지 입력하세요.")
         return None
-    if not GROUP_DIV_RE.fullmatch(group_text):
-        _alert("조직은 1-1-5 형식으로 입력하세요.")
+    part = _parse_positive_int(part_text)
+    grade = _parse_positive_int(grade_text)
+    klass = _parse_positive_int(class_text)
+    if part is None or grade is None or klass is None:
+        _alert("부, 학년, 반은 1 이상의 숫자로 입력하세요.")
         return None
-    return year, group_text, name_text
+    return year, part, grade, klass, name_text
 
 
-def _handle_delete(year_text: str, group_text: str, name_text: str) -> bool:
+def _handle_delete(
+    year_text: str,
+    part_text: str,
+    grade_text: str,
+    class_text: str,
+    name_text: str,
+) -> bool:
     """선택한 행의 기본 키로만 삭제한다. 선택이 없으면 입력 칸의 세 키로 삭제한다."""
     edit_raw = st.session_state.get("teacher_edit_key")
     try:
@@ -468,11 +550,11 @@ def _handle_delete(year_text: str, group_text: str, name_text: str) -> bool:
             # 그리드에서 고른 행의 키만 사용한다. 입력 칸을 바꿔도 다른 행이 지워지지 않는다.
             key = _as_teacher_key(edit_raw)
         else:
-            parsed = _parse_teacher_key(year_text, group_text, name_text)
+            parsed = _parse_teacher_key(year_text, part_text, grade_text, class_text, name_text)
             if parsed is None:
                 return False
-            year, group, name = parsed
-            key = _make_teacher_key(year, name, group)
+            year, part, grade, klass, name = parsed
+            key = _make_teacher_key(year, name, part, grade, klass)
         _delete_teacher(key)
     except Exception as exc:  # noqa: BLE001
         _alert(f"삭제하지 못했습니다: {exc}")
@@ -493,7 +575,9 @@ def _apply_form_overrides() -> None:
     if not fill:
         return
     st.session_state["teacher_input_year"] = fill["year"]
-    st.session_state["teacher_input_group"] = fill["group"]
+    st.session_state["teacher_input_part"] = fill["part"]
+    st.session_state["teacher_input_grade"] = fill["grade"]
+    st.session_state["teacher_input_class"] = fill["class"]
     st.session_state["teacher_input_name"] = fill["name"]
     st.session_state["teacher_input_phone"] = fill["phone"]
     st.session_state["teacher_input_address"] = fill["address"]
@@ -509,19 +593,27 @@ def _queue_selected_row(rows: list[dict], selected: list[int]) -> None:
         return
     row = rows[index]
     year = int(row["year"])
-    group = str(row.get("children_group_div") or "")
+    part = row.get("part")
+    grade = row.get("grade")
+    klass = row.get("class")
     name = str(row.get("teacher_name") or "")
-    sig = (str(year), group, name)
+    sig = (str(year), str(part), str(grade), str(klass), name)
     if sig == st.session_state.get("teacher_loaded_sig"):
+        return
+    try:
+        key = _make_teacher_key(year, name, part, grade, klass)
+    except ValueError:
         return
     st.session_state["teacher_loaded_sig"] = sig
     st.session_state["teacher_pending_fill"] = {
         "year": str(year),
-        "group": group,
+        "part": str(key["part"]),
+        "grade": str(key["grade"]),
+        "class": str(key["class"]),
         "name": name,
         "phone": "" if row.get("phone") is None else str(row.get("phone")),
         "address": "" if row.get("address") is None else str(row.get("address")),
-        "key": _make_teacher_key(year, name, group),
+        "key": key,
     }
     st.rerun()
 
@@ -530,13 +622,17 @@ def render() -> None:
     """담임 정보 입력과 연도별 목록."""
     _apply_form_overrides()
     st.markdown("**담임 정보**")
-    col_year, col_group, col_name, col_phone = st.columns(
-        [1, 1.3, 1.2, 1.6], vertical_alignment="bottom"
+    col_year, col_part, col_grade, col_class, col_name, col_phone = st.columns(
+        [1, 0.7, 0.7, 0.7, 1.2, 1.6], vertical_alignment="bottom"
     )
     with col_year:
         year_text = st.text_input("연도", key="teacher_input_year")
-    with col_group:
-        group_text = st.text_input("조직", placeholder="1-1-5", key="teacher_input_group")
+    with col_part:
+        part_text = st.text_input("부", placeholder="2", key="teacher_input_part")
+    with col_grade:
+        grade_text = st.text_input("학년", placeholder="2", key="teacher_input_grade")
+    with col_class:
+        class_text = st.text_input("반", placeholder="11", key="teacher_input_class")
     with col_name:
         name_text = st.text_input("이름", key="teacher_input_name")
     with col_phone:
@@ -553,14 +649,16 @@ def render() -> None:
         deleted = st.button("삭제", use_container_width=True, key="teacher_delete_btn")
 
     if submitted:
-        saved = _handle_save(year_text, group_text, name_text, phone_text, address_text)
+        saved = _handle_save(
+            year_text, part_text, grade_text, class_text, name_text, phone_text, address_text
+        )
         if saved is not None:
             st.session_state["teacher_saved_msg"] = True
             _refresh_teacher_list(saved)
             st.rerun()
 
     if deleted:
-        if _handle_delete(year_text, group_text, name_text):
+        if _handle_delete(year_text, part_text, grade_text, class_text, name_text):
             st.session_state["teacher_deleted_msg"] = True
             st.rerun()
 

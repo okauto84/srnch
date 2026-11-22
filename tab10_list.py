@@ -22,8 +22,9 @@ VISIBLE_COLUMNS: tuple[tuple[str, str], ...] = (
     ("name", "이름"),
     ("name_distinct", "구분"),
     ("gender", "성별"),
-    ("children_group", "어린이 조직"),
-    ("children_group_div", "조직"),
+    ("part", "부"),
+    ("grade", "학년"),
+    ("class", "반"),
     ("teacher_name", "담임 선생님"),
     ("birth_date", "생년월일"),
     ("age", "나이"),
@@ -39,17 +40,18 @@ PRE_PROMPT = """# 역할
 - 현재 데이터 기준으로 친절하게 답변하라.
 - 근거는 members 배열뿐이다. 배열에 없는 사실은 "데이터에 없습니다"라고 답한다.
 - 인원과 조건 검색은 members의 필드를 직접 세고 비교한다.
-- 학생을 지칭할 때는 반드시 `이름구분(어린이 조직 div)` 형식으로 쓴다. 예: 고승아A(2-1-13)
+- 학생을 지칭할 때는 반드시 `이름구분(부-학년-반)` 형식으로 쓴다. 예: 고승아A(2-1-13)
 - 여러 명이면 그 형식으로 나열한다.
 
 # 필드
 - members 각 행은 srnch_members의 모든 컬럼을 포함한다.
-- year, children_group_div 기준으로 조인한 srnch_teacher 행은 teachers 배열에 모두 넣는다.
+- year와 part-grade-class로 만든 조직 키 기준으로 조인한 srnch_teacher 행은 teachers 배열에 모두 넣는다.
 - teacher_name은 조인된 담임 이름을 이어 붙인 표시용 값이다.
 - name: 회원 이름
 - name_distinct: 동명이인 구분 한 글자. 없으면 빈 문자열
-- children_group_div: `1-2-5`처럼 부-학년-반을 숫자로 줄인 값
-- children_group: "03.유년 - 유년1부 - 2학년 - 05반" 형태의 조직 경로
+- part, grade, class: 부, 학년, 반 숫자. 예: 2, 2, 11
+- children_group_div: part-grade-class를 이은 표시 값. 예: `2-2-11`
+- children_group: "유년-유년2부-2학년-11반" 형태의 조직 경로. 화면 그리드에는 보이지 않는다.
 
 # members
 {members}
@@ -66,8 +68,9 @@ COLUMN_WIDTHS = {
     "이름": 90,
     "구분": 48,
     "성별": 48,
-    "어린이 조직": 240,
-    "조직": 90,
+    "부": 56,
+    "학년": 56,
+    "반": 56,
     "담임 선생님": 90,
     "생년월일": 110,
     "나이": 48,
@@ -96,7 +99,7 @@ def _supabase_url(project: str) -> str:
 
 
 def _teachers_by_group(client, year: int) -> dict[str, list[dict]]:
-    """year, children_group_div 기준 srnch_teacher 전체 행."""
+    """year, part, grade, class 기준 srnch_teacher 전체 행."""
     response = (
         client.table("srnch_teacher")
         .select("*")
@@ -106,10 +109,12 @@ def _teachers_by_group(client, year: int) -> dict[str, list[dict]]:
     )
     grouped: dict[str, list[dict]] = {}
     for row in response.data or []:
-        group_div = str(row.get("children_group_div") or "").strip()
-        if not group_div:
+        part = _as_int(row.get("part"))
+        grade = _as_int(row.get("grade"))
+        klass = _as_int(row.get("class"))
+        if part is None or grade is None or klass is None:
             continue
-        grouped.setdefault(group_div, []).append(row)
+        grouped.setdefault(f"{part}-{grade}-{klass}", []).append(row)
     return grouped
 
 
@@ -126,13 +131,15 @@ def _teacher_display_name(teachers: list[dict]) -> str:
 
 @st.cache_data(ttl=30, show_spinner=False)
 def _fetch_members(url: str, key: str, year: int) -> list[dict]:
-    """srnch_members 전체와, year·children_group_div로 조인한 srnch_teacher 전체를 붙인다."""
+    """srnch_members 전체와, year·part-grade-class로 조인한 srnch_teacher 전체를 붙인다."""
     client = create_client(url, key)
     response = (
         client.table("srnch_members")
         .select("*")
         .eq("year", year)
-        .order("children_group_div", nullsfirst=False)
+        .order("part", nullsfirst=False)
+        .order("grade", nullsfirst=False)
+        .order("class", nullsfirst=False)
         .order("name", nullsfirst=False)
         .limit(2000)
         .execute()
@@ -140,7 +147,8 @@ def _fetch_members(url: str, key: str, year: int) -> list[dict]:
     teachers_by_group = _teachers_by_group(client, year)
     rows = response.data or []
     for row in rows:
-        group_div = str(row.get("children_group_div") or "").strip()
+        row["children_group_div"] = _org_div_text(row)
+        group_div = row["children_group_div"]
         teachers = teachers_by_group.get(group_div, [])
         row["teachers"] = teachers
         row["teacher_name"] = _teacher_display_name(teachers)
@@ -149,14 +157,14 @@ def _fetch_members(url: str, key: str, year: int) -> list[dict]:
 
 
 def _grid_sort_key(row: dict) -> tuple:
-    """조직(부-학년-반) 오름차순. 비어 있으면 뒤로 보내고, 같은 조직은 이름순이다."""
-    text = str(row.get("children_group_div") or "").strip()
+    """부, 학년, 반 오름차순. 비어 있으면 뒤로 보내고, 같은 반은 이름순이다."""
+    part = _as_int(row.get("part"))
+    grade = _as_int(row.get("grade"))
+    klass = _as_int(row.get("class"))
     name = str(row.get("name") or "").strip()
-    parts = text.split("-")
-    if len(parts) == 3 and all(part.isdigit() for part in parts):
-        dept, grade, klass = (int(part) for part in parts)
-        return (False, dept, grade, klass, name)
-    return (True, text, 0, 0, name)
+    if part is None or grade is None or klass is None:
+        return (True, part or 0, grade or 0, klass or 0, name)
+    return (False, part, grade, klass, name)
 
 
 def clear_members_cache() -> None:
@@ -377,6 +385,16 @@ def _as_int(value: object) -> int | None:
         return None
 
 
+def _org_div_text(row: dict) -> str:
+    """part, grade, class를 화면용 부-학년-반 문자열로 만든다."""
+    part = _as_int(row.get("part"))
+    grade = _as_int(row.get("grade"))
+    klass = _as_int(row.get("class"))
+    if part is None or grade is None or klass is None:
+        return ""
+    return f"{part}-{grade}-{klass}"
+
+
 def _parse_org_div(value: object) -> tuple[int, int, int] | None:
     match = _ORG_DIV_RE.fullmatch(str(value or "").strip())
     if not match:
@@ -421,7 +439,7 @@ def _org_spec(year: int, rows: list[dict]) -> dict | None:
     grades_by_dept: dict[int, set[int]] = {}
     klasses: set[int] = set()
     for row in rows:
-        parsed = _parse_org_div(row.get("children_group_div"))
+        parsed = _parse_org_div(_org_div_text(row))
         member_id = _as_int(row.get("id"))
         if parsed is None or member_id is None or member_id in seen:
             continue
@@ -446,7 +464,7 @@ def _org_spec(year: int, rows: list[dict]) -> dict | None:
     members.sort(key=lambda item: (item["dept"], item["grade"], item["klass"], item["label"], item["id"]))
     teachers: dict[tuple[int, int, int], str] = {}
     for row in rows:
-        parsed = _parse_org_div(row.get("children_group_div"))
+        parsed = _parse_org_div(_org_div_text(row))
         if parsed is None:
             continue
         name = str(row.get("teacher_name") or "").strip()
@@ -510,7 +528,7 @@ def _apply_org_save(year: int, rows: list[dict], event: dict) -> tuple[int, int]
             delete_ids.append(member_id)
     delete_set = set(delete_ids)
 
-    planned: list[tuple[int, str, str]] = []
+    planned: list[tuple[int, int, int, int, str]] = []
     for raw in moves_in:
         if not isinstance(raw, dict):
             raise ValueError("이동 데이터가 올바르지 않습니다.")
@@ -524,24 +542,25 @@ def _apply_org_save(year: int, rows: list[dict], event: dict) -> tuple[int, int]
             raise ValueError("이동할 반 정보가 올바르지 않습니다.")
         if not (1 <= dept <= 30 and 1 <= grade <= 30 and 1 <= klass <= 60):
             raise ValueError("이동할 반 정보가 올바르지 않습니다.")
-        group_div = f"{dept}-{grade}-{klass}"
         source = str(by_id[member_id].get("children_group") or template)
         group = _format_children_group(source, dept, grade, klass)
-        if group_div == str(by_id[member_id].get("children_group_div") or "") and group == source:
+        if _parse_org_div(_org_div_text(by_id[member_id])) == (dept, grade, klass) and group == source:
             continue
-        planned.append((member_id, group_div, group))
+        planned.append((member_id, dept, grade, klass, group))
 
     client = create_client(
         _supabase_url(_secret("SUPABASE_PROJECT")),
         _secret("SUPABASE_KEY"),
     )
     today = date.today().isoformat()
-    for member_id, group_div, group in planned:
+    for member_id, dept, grade, klass, group in planned:
         (
             client.table("srnch_members")
             .update(
                 {
-                    "children_group_div": group_div,
+                    "part": dept,
+                    "grade": grade,
+                    "class": klass,
                     "children_group": group,
                     "updated_at": today,
                 }
@@ -559,7 +578,9 @@ _MEMBER_ADD_KEYS = (
     "member_add_name",
     "member_add_distinct",
     "member_add_gender",
-    "member_add_div",
+    "member_add_part",
+    "member_add_grade",
+    "member_add_class",
 )
 
 
@@ -594,22 +615,30 @@ def _children_group_path(dept: int, grade: int, klass: int) -> str:
     return f"유년-유년{dept}부-{grade}학년-{klass:02d}반"
 
 
-def _member_group_fields(group_div: str) -> tuple[str, str]:
-    parsed = _parse_org_div(group_div)
+def _member_org(part_text: str, grade_text: str, class_text: str) -> tuple[int, int, int]:
+    """부, 학년, 반 입력값을 조직 번호로 읽는다."""
+    parsed = _parse_org_div(f"{part_text.strip()}-{grade_text.strip()}-{class_text.strip()}")
     if parsed is None:
-        raise ValueError("조직은 1-1-5 형식으로 입력하세요.")
-    dept, grade, klass = parsed
-    return f"{dept}-{grade}-{klass}", _children_group_path(dept, grade, klass)
+        raise ValueError("부, 학년, 반은 숫자로 입력하세요. 부는 1–30, 학년은 1–30, 반은 1–60입니다.")
+    return parsed
 
 
-def _member_payload(name: str, distinct: str, gender: str, group_div: str) -> dict:
-    children_group_div, children_group = _member_group_fields(group_div)
+def _member_payload(
+    name: str,
+    distinct: str,
+    gender: str,
+    part: int,
+    grade: int,
+    klass: int,
+) -> dict:
     return {
         "name": name,
         "name_distinct": distinct or None,
         "gender": gender or None,
-        "children_group_div": children_group_div,
-        "children_group": children_group,
+        "part": part,
+        "grade": grade,
+        "class": klass,
+        "children_group": _children_group_path(part, grade, klass),
         "updated_at": date.today().isoformat(),
     }
 
@@ -619,12 +648,14 @@ def _insert_member(
     name: str,
     distinct: str,
     gender: str,
-    group_div: str,
+    part: int,
+    grade: int,
+    klass: int,
 ) -> None:
-    """이름, 구분, 성별, 조직을 선택 연도의 srnch_members에 추가한다."""
+    """이름, 구분, 성별, 부, 학년, 반을 선택 연도의 srnch_members에 추가한다."""
     client = _member_client()
     today = date.today().isoformat()
-    payload = _member_payload(name, distinct, gender, group_div)
+    payload = _member_payload(name, distinct, gender, part, grade, klass)
     payload["id"] = _next_member_id(client)
     payload["year"] = int(year)
     payload["created_at"] = today
@@ -637,10 +668,12 @@ def _update_member(
     name: str,
     distinct: str,
     gender: str,
-    group_div: str,
+    part: int,
+    grade: int,
+    klass: int,
 ) -> None:
-    """선택한 회원 한 명의 이름, 구분, 성별, 조직을 고친다."""
-    payload = _member_payload(name, distinct, gender, group_div)
+    """선택한 회원 한 명의 이름, 구분, 성별, 부, 학년, 반을 고친다."""
+    payload = _member_payload(name, distinct, gender, part, grade, klass)
     response = (
         _member_client()
         .table("srnch_members")
@@ -685,7 +718,9 @@ def _apply_member_form() -> None:
     st.session_state["member_add_name"] = fill["name"]
     st.session_state["member_add_distinct"] = fill["distinct"]
     st.session_state["member_add_gender"] = fill["gender"]
-    st.session_state["member_add_div"] = fill["div"]
+    st.session_state["member_add_part"] = fill["part"]
+    st.session_state["member_add_grade"] = fill["grade"]
+    st.session_state["member_add_class"] = fill["class"]
     st.session_state["member_selected_id"] = fill["id"]
 
 
@@ -708,7 +743,9 @@ def _queue_member_selection(rows: list[dict], selected: list[int]) -> None:
         "name": _field_text(row.get("name")).strip(),
         "distinct": _field_text(row.get("name_distinct")).strip(),
         "gender": _field_text(row.get("gender")).strip(),
-        "div": _field_text(row.get("children_group_div")).strip(),
+        "part": "" if _as_int(row.get("part")) is None else str(_as_int(row.get("part"))),
+        "grade": "" if _as_int(row.get("grade")) is None else str(_as_int(row.get("grade"))),
+        "class": "" if _as_int(row.get("class")) is None else str(_as_int(row.get("class"))),
     }
     st.rerun()
 
@@ -724,8 +761,8 @@ def _render_member_add(year: int) -> None:
         st.success(deleted_msg)
 
     st.markdown('<span class="member-quick-add"></span>', unsafe_allow_html=True)
-    name_col, distinct_col, gender_col, div_col, action_col, _rest = st.columns(
-        [1.1, 0.6, 0.6, 1.0, 1.6, 2.4],
+    name_col, distinct_col, gender_col, part_col, grade_col, class_col, action_col, _rest = st.columns(
+        [1.1, 0.55, 0.55, 0.5, 0.55, 0.5, 1.6, 1.6],
         vertical_alignment="bottom",
     )
     with name_col:
@@ -734,8 +771,12 @@ def _render_member_add(year: int) -> None:
         distinct = st.text_input("구분", key="member_add_distinct")
     with gender_col:
         gender = st.text_input("성별", key="member_add_gender")
-    with div_col:
-        group_div = st.text_input("조직", placeholder="1-1-5", key="member_add_div")
+    with part_col:
+        part_text = st.text_input("부", placeholder="2", key="member_add_part")
+    with grade_col:
+        grade_text = st.text_input("학년", placeholder="2", key="member_add_grade")
+    with class_col:
+        class_text = st.text_input("반", placeholder="11", key="member_add_class")
     with action_col:
         delete_col, save_col = st.columns(2, gap="small", vertical_alignment="bottom")
         with delete_col:
@@ -766,19 +807,27 @@ def _render_member_add(year: int) -> None:
     name = name.strip()
     distinct = distinct.strip()
     gender = gender.strip()
-    group_div = group_div.strip()
+    part_text = part_text.strip()
+    grade_text = grade_text.strip()
+    class_text = class_text.strip()
     if not name:
         st.error("이름을 입력하세요.")
         return
-    if not group_div:
-        st.error("조직을 입력하세요.")
+    missing = [
+        label
+        for label, value in (("부", part_text), ("학년", grade_text), ("반", class_text))
+        if not value
+    ]
+    if missing:
+        st.error("빈칸이 있습니다: " + ", ".join(missing))
         return
     member_id = _as_int(st.session_state.get("member_selected_id"))
     try:
+        part, grade, klass = _member_org(part_text, grade_text, class_text)
         if member_id is None:
-            _insert_member(int(year), name, distinct, gender, group_div)
+            _insert_member(int(year), name, distinct, gender, part, grade, klass)
         else:
-            _update_member(int(year), member_id, name, distinct, gender, group_div)
+            _update_member(int(year), member_id, name, distinct, gender, part, grade, klass)
     except Exception as exc:  # noqa: BLE001
         st.error(f"저장하지 못했습니다: {exc}")
         return
