@@ -208,6 +208,85 @@ def _fetch_teachers(year: int, _version: int) -> list[dict]:
     return response.data or []
 
 
+def _copy_teachers_to_next_year(source_year: int) -> tuple[int, int, int]:
+    """선택 연도 담임 전체를 내년(year+1)으로 복사한다.
+
+    Returns:
+        (복사 건수, 이미 있어 건너뛴 건수, 대상 연도)
+    """
+    target_year = int(source_year) + 1
+    client = _client()
+    source_rows = (
+        client.table("srnch_teacher")
+        .select("children_group_div,teacher_name,phone,address")
+        .eq("year", source_year)
+        .execute()
+    ).data or []
+    if not source_rows:
+        raise LookupError(f"{source_year}년 담임 정보가 없습니다.")
+
+    existing_rows = (
+        client.table("srnch_teacher")
+        .select("teacher_name,children_group_div")
+        .eq("year", target_year)
+        .execute()
+    ).data or []
+    existing_keys = {
+        (str(row.get("teacher_name") or ""), str(row.get("children_group_div") or ""))
+        for row in existing_rows
+    }
+
+    today = _today()
+    payloads: list[dict] = []
+    skipped = 0
+    for row in source_rows:
+        name = str(row.get("teacher_name") or "").strip()
+        group = str(row.get("children_group_div") or "").strip()
+        if not name or not group:
+            skipped += 1
+            continue
+        if (name, group) in existing_keys:
+            skipped += 1
+            continue
+        payloads.append(
+            {
+                "year": target_year,
+                "teacher_name": name,
+                "children_group_div": group,
+                "phone": row.get("phone"),
+                "address": row.get("address"),
+                "created_at": today,
+                "updated_at": today,
+            }
+        )
+
+    if payloads:
+        client.table("srnch_teacher").insert(payloads).execute()
+    return len(payloads), skipped, target_year
+
+
+def _handle_copy_next_year(source_year: int) -> bool:
+    """내년도 복사 후 목록을 새로고침한다."""
+    try:
+        copied, skipped, target_year = _copy_teachers_to_next_year(int(source_year))
+    except Exception as exc:  # noqa: BLE001
+        _alert(f"내년도 복사에 실패했습니다: {exc}")
+        return False
+
+    if copied == 0 and skipped == 0:
+        _alert(f"{source_year}년 담임 정보가 없습니다.")
+        return False
+
+    st.session_state["teacher_copied_msg"] = {
+        "source_year": int(source_year),
+        "target_year": target_year,
+        "copied": copied,
+        "skipped": skipped,
+    }
+    _refresh_teacher_list(target_year)
+    return True
+
+
 def _to_display_rows(rows: list[dict]) -> list[dict]:
     display: list[dict] = []
     for row in rows:
@@ -317,6 +396,21 @@ def _clear_form() -> None:
     )
 
 
+def _list_year_options() -> list[int]:
+    """기본 연도 + 내년도 복사로 생긴 연도를 선택지에 포함한다."""
+    options = list(YEAR_OPTIONS)
+    extra = st.session_state.get("teacher_extra_years") or []
+    for year in extra:
+        try:
+            value = int(year)
+        except (TypeError, ValueError):
+            continue
+        if value not in options:
+            options.append(value)
+    options.sort()
+    return options
+
+
 def _refresh_teacher_list(year: int | None = None) -> None:
     """저장·삭제 뒤 캐시를 비우고 그리드가 최신 목록을 다시 읽게 한다."""
     _fetch_teachers.clear()
@@ -324,7 +418,17 @@ def _refresh_teacher_list(year: int | None = None) -> None:
     st.session_state["teacher_grid_generation"] = (
         int(st.session_state.get("teacher_grid_generation", 0)) + 1
     )
-    if year is not None and year in YEAR_OPTIONS:
+    if year is None:
+        return
+    year = int(year)
+    options = _list_year_options()
+    if year not in options:
+        extra = list(st.session_state.get("teacher_extra_years") or [])
+        if year not in extra:
+            extra.append(year)
+            st.session_state["teacher_extra_years"] = extra
+        options = _list_year_options()
+    if year in options:
         st.session_state["teacher_list_year"] = year
 
 
@@ -464,18 +568,45 @@ def render() -> None:
         st.success("저장했습니다.")
     if st.session_state.pop("teacher_deleted_msg", False):
         st.success("삭제했습니다.")
+    copied_msg = st.session_state.pop("teacher_copied_msg", None)
+    if copied_msg:
+        copied = int(copied_msg["copied"])
+        skipped = int(copied_msg["skipped"])
+        source_year = int(copied_msg["source_year"])
+        target_year = int(copied_msg["target_year"])
+        if copied > 0:
+            msg = f"{source_year}년 → {target_year}년으로 {copied}건 복사했습니다."
+            if skipped:
+                msg += f" (이미 있어 건너뜀 {skipped}건)"
+            st.success(msg)
+        else:
+            st.info(
+                f"{target_year}년에 이미 같은 담임이 있어 새로 복사한 건이 없습니다."
+                f" (건너뜀 {skipped}건)"
+            )
 
     version = int(st.session_state.get("teacher_data_version", 0))
-    if st.session_state.get("teacher_list_year") not in YEAR_OPTIONS:
-        st.session_state["teacher_list_year"] = YEAR_OPTIONS[0]
+    year_options = _list_year_options()
+    if st.session_state.get("teacher_list_year") not in year_options:
+        st.session_state["teacher_list_year"] = year_options[0]
 
-    year_col, _ = st.columns([1, 5])
+    year_col, copy_col, _ = st.columns([1, 1.2, 3.8], vertical_alignment="bottom")
     with year_col:
         selected_year = st.selectbox(
             "연도",
-            options=list(YEAR_OPTIONS),
+            options=year_options,
             key="teacher_list_year",
         )
+    with copy_col:
+        copy_clicked = st.button(
+            "내년도 복사",
+            use_container_width=True,
+            key="teacher_copy_next_year_btn",
+        )
+
+    if copy_clicked:
+        if _handle_copy_next_year(int(selected_year)):
+            st.rerun()
 
     try:
         rows = _fetch_teachers(int(selected_year), version)
