@@ -1,4 +1,4 @@
-"""이 스크립트와 같은 폴더의 2027 명단 엑셀을 최대 9반으로 재배치한 뒤 srnch_members에 넣는다.
+"""이 스크립트와 같은 폴더의 2027 명단 엑셀을 한 반 5명 이하로 재배치한 뒤 srnch_members에 넣는다.
 
 조직 컬럼에서 부·학년·반을 읽고, 출석 수가 한 반에 몰리지 않도록
 높은 출석부터 1반, 2반, … 순으로 한 명씩 나누어 배정한다.
@@ -19,7 +19,7 @@ from pathlib import Path
 import openpyxl
 
 YEAR = 2027
-MAX_CLASSES = 9
+MAX_CLASS_SIZE = 5
 TABLE = "srnch_members"
 EXCEL_PATH = Path(__file__).resolve().parent
 
@@ -135,16 +135,19 @@ def load_students(path: Path) -> list[Student]:
     return students
 
 
-def assign_classes(students: list[Student], max_classes: int = MAX_CLASSES) -> int:
-    """출석이 높은 학생부터 1반에서 마지막 반으로 한 명씩 돌며 배정한다.
+def assign_classes(students: list[Student], max_size: int = MAX_CLASS_SIZE) -> int:
+    """한 반 인원이 max_size를 넘지 않도록 필요한 만큼 반을 만든다.
 
+    출석이 높은 학생부터 1반에서 마지막 반으로 한 명씩 돌며 배정한다.
     같은 출석 수는 반마다 최대 1명 차이로 나뉘고, 각 반은 높은 출석과 낮은 출석을
     함께 받는다. 반 인원도 최대 1명 차이 난다.
-    반환값은 실제로 만든 반 수(최대 max_classes)이다.
+    반환값은 실제로 만든 반 수이다.
     """
-    if max_classes < 1:
-        raise ValueError("반 수는 1 이상이어야 합니다.")
-    class_count = min(max_classes, len(students))
+    if max_size < 1:
+        raise ValueError("한 반 인원은 1명 이상이어야 합니다.")
+    if not students:
+        return 0
+    class_count = (len(students) + max_size - 1) // max_size
     ordered = sorted(students, key=lambda student: (-student.attendance, student.order))
     for turn, student in enumerate(ordered):
         student.new_class = (turn % class_count) + 1
@@ -338,7 +341,7 @@ def run_batch(source: Path | None = None, *, dry_run: bool = False, client=None)
         if (part, grade) in seen:
             raise ValueError(f"{part}부 {grade}학년이 엑셀 두 곳에 있습니다: {path.name}")
         seen.add((part, grade))
-        class_count = assign_classes(students, MAX_CLASSES)
+        class_count = assign_classes(students)
         blocks.append(f"[{path.name}]\n{summarize(students, class_count)}")
         prepared.append(students)
 
