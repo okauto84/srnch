@@ -13,6 +13,8 @@ import streamlit as st
 import urllib3
 from supabase import Client, create_client
 
+import batch2027
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 MEMBER_FIELDS = (
@@ -430,37 +432,57 @@ def sync_members_from_dimode() -> tuple[int, list[dict[str, Any]]]:
     return count, members[:20]
 
 
-def render() -> None:
-    st.subheader("관리")
-    st.caption("디모데 회원 목록을 수집하여 Supabase `srnch_members`에 적재합니다.")
-
-    required = [
-        "SUPABASE_PROJECT",
-        "SUPABASE_KEY",
-        "W_DIMODE_URL",
-        "W_DIMODE_ID",
-        "W_DIMODE_PW",
-        "W_DIMODE_URL_MEMBERS",
-    ]
+def _missing_secrets(names: tuple[str, ...]) -> list[str]:
     missing = []
-    for key in required:
+    for key in names:
         try:
             _secret(key)
         except Exception:  # noqa: BLE001
             missing.append(key)
+    return missing
 
-    if missing:
-        st.error("다음 Streamlit secrets 변수가 필요합니다: " + ", ".join(missing))
+
+def render() -> None:
+    st.subheader("관리")
+    st.caption("디모데 회원 목록을 수집하여 Supabase `srnch_members`에 적재합니다.")
+
+    missing_supabase = _missing_secrets(("SUPABASE_PROJECT", "SUPABASE_KEY"))
+    missing_dimode = _missing_secrets(
+        ("W_DIMODE_URL", "W_DIMODE_ID", "W_DIMODE_PW", "W_DIMODE_URL_MEMBERS")
+    )
+    if missing_supabase:
+        st.error("다음 Streamlit secrets 변수가 필요합니다: " + ", ".join(missing_supabase))
         return
 
-    if st.button("회원 동기화 실행", type="primary"):
-        with st.spinner("로그인 및 회원 수집 중..."):
-            try:
-                count, preview = sync_members_from_dimode()
-            except Exception as exc:  # noqa: BLE001
-                st.error(f"동기화 실패: {exc}")
-                return
+    sync_col, batch_col, _ = st.columns([1.3, 1.5, 3.2])
+    with sync_col:
+        sync_clicked = st.button("회원 동기화 실행", type="primary")
+    with batch_col:
+        batch_clicked = st.button("(임시)batch2027")
 
-        st.success(f"srnch_members에 {count}건 적재 완료")
-        if preview:
-            st.dataframe(preview, use_container_width=True)
+    if missing_dimode:
+        st.caption("회원 동기화에는 다음 secrets가 필요합니다: " + ", ".join(missing_dimode))
+
+    if sync_clicked:
+        if missing_dimode:
+            st.error("다음 Streamlit secrets 변수가 필요합니다: " + ", ".join(missing_dimode))
+        else:
+            with st.spinner("로그인 및 회원 수집 중..."):
+                try:
+                    count, preview = sync_members_from_dimode()
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"동기화 실패: {exc}")
+                    return
+            st.success(f"srnch_members에 {count}건 적재 완료")
+            if preview:
+                st.dataframe(preview, use_container_width=True)
+
+    if batch_clicked:
+        with st.spinner("data 폴더 명단을 재배치해 넣는 중..."):
+            try:
+                report = batch2027.run_batch(client=_get_supabase())
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"batch2027 실패: {exc}")
+                return
+        st.success("srnch_members에 year=2027 재배치 적재를 마쳤습니다.")
+        st.text(report)
