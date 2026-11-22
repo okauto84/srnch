@@ -100,6 +100,20 @@
       border-color: #7eace0;
       box-shadow: 0 0 0 2px rgba(70, 130, 210, 0.28);
     }
+    .cell.no-teacher {
+      background: #fdecec;
+      border-color: #f3c9c9;
+    }
+    .cell.no-teacher.selected {
+      background: #f8d6d6;
+      border-color: #e7a8a8;
+      box-shadow: 0 0 0 2px rgba(180, 35, 24, 0.2);
+    }
+    .cell.no-teacher.drop {
+      background: #fff6f6;
+      border-color: #e8b0b0;
+      box-shadow: 0 0 0 2px rgba(180, 35, 24, 0.16);
+    }
     .block-gap { height: 10px; }
     .names {
       width: 100%;
@@ -433,8 +447,9 @@
             cell.dataset.dept = String(block.dept);
             cell.dataset.grade = String(grade);
             cell.dataset.klass = String(klass);
-            place(cell, 3 + index, row);
             const teacherName = teacherByCell.get(block.dept + "-" + grade + "-" + klass) || "";
+            if (!teacherName) cell.classList.add("no-teacher");
+            place(cell, 3 + index, row);
             if (teacherName) {
               const teacher = document.createElement("div");
               teacher.className = "teacher";

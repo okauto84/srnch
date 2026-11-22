@@ -764,6 +764,7 @@ def _render_member_add(year: int) -> None:
     name_col, distinct_col, gender_col, part_col, grade_col, class_col, action_col, _rest = st.columns(
         [1.1, 0.55, 0.55, 0.5, 0.55, 0.5, 1.6, 1.6],
         vertical_alignment="bottom",
+        wrap=False,
     )
     with name_col:
         name = st.text_input("이름", key="member_add_name")
@@ -778,7 +779,7 @@ def _render_member_add(year: int) -> None:
     with class_col:
         class_text = st.text_input("반", placeholder="11", key="member_add_class")
     with action_col:
-        delete_col, save_col = st.columns(2, gap="small", vertical_alignment="bottom")
+        delete_col, save_col = st.columns(2, gap="small", vertical_alignment="bottom", wrap=False)
         with delete_col:
             deleted = st.button("삭제", key="member_add_delete_btn", type="secondary")
         with save_col:
