@@ -71,12 +71,24 @@
     .cell {
       background: var(--cell);
       min-height: 58px;
-      padding: 6px 6px 5px;
+      padding: 5px 6px 5px;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
+      gap: 3px;
       cursor: pointer;
       transition: background-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+    }
+    .teacher {
+      width: 100%;
+      font-size: 10px;
+      font-weight: 600;
+      line-height: 1.25;
+      text-align: center;
+      color: #5d7190;
+      pointer-events: none;
+      user-select: none;
     }
     .cell.selected {
       background: #dcedfb;
@@ -370,6 +382,12 @@
       });
 
       const classes = spec.classes || [];
+      const teacherByCell = new Map();
+      (spec.teachers || []).forEach(function (item) {
+        const label = String(item.name || "").trim();
+        if (!label) return;
+        teacherByCell.set(item.dept + "-" + item.grade + "-" + item.klass, label);
+      });
       const board = document.createElement("div");
       board.className = "board";
       board.style.setProperty("--cols", String(Math.max(classes.length, 1)));
@@ -416,6 +434,13 @@
             cell.dataset.grade = String(grade);
             cell.dataset.klass = String(klass);
             place(cell, 3 + index, row);
+            const teacherName = teacherByCell.get(block.dept + "-" + grade + "-" + klass) || "";
+            if (teacherName) {
+              const teacher = document.createElement("div");
+              teacher.className = "teacher";
+              teacher.textContent = teacherName;
+              cell.appendChild(teacher);
+            }
             const names = document.createElement("div");
             names.className = "names";
             cell.appendChild(names);

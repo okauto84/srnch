@@ -444,6 +444,14 @@ def _org_spec(year: int, rows: list[dict]) -> dict | None:
     if not members:
         return None
     members.sort(key=lambda item: (item["dept"], item["grade"], item["klass"], item["label"], item["id"]))
+    teachers: dict[tuple[int, int, int], str] = {}
+    for row in rows:
+        parsed = _parse_org_div(row.get("children_group_div"))
+        if parsed is None:
+            continue
+        name = str(row.get("teacher_name") or "").strip()
+        if name:
+            teachers[parsed] = name
     return {
         "year": int(year),
         "classes": _class_columns(klasses),
@@ -452,12 +460,20 @@ def _org_spec(year: int, rows: list[dict]) -> dict | None:
             for dept, grades in sorted(grades_by_dept.items())
         ],
         "members": members,
+        "teachers": [
+            {"dept": dept, "grade": grade, "klass": klass, "name": name}
+            for (dept, grade, klass), name in sorted(teachers.items())
+        ],
     }
 
 
 def _org_signature(year: int, spec: dict) -> str:
     parts = [f"{item['id']}:{item['dept']}-{item['grade']}-{item['klass']}" for item in spec["members"]]
-    raw = f"{year}|{'|'.join(parts)}"
+    teacher_parts = [
+        f"{item['dept']}-{item['grade']}-{item['klass']}:{item['name']}"
+        for item in spec.get("teachers") or []
+    ]
+    raw = f"{year}|{'|'.join(parts)}|{'|'.join(teacher_parts)}"
     return hashlib.sha1(raw.encode()).hexdigest()[:16]
 
 
