@@ -1073,14 +1073,13 @@ def render(*, force_refresh: bool = False) -> None:
             max-width: 100% !important;
         }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stButton"] button {
-            min-height: 0 !important;
-            height: 1.35rem !important;
-            max-height: 1.35rem !important;
-            padding: 0 16px !important;
+            min-height: 0;
+            height: auto;
+            padding: 8px 28px;
             border-radius: 8px !important;
-            font-size: 12px;
+            font-size: 14px;
             font-weight: 700;
-            line-height: 1.35rem !important;
+            line-height: 1.2;
             white-space: nowrap;
         }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stBaseButton-primary"] {
@@ -1095,10 +1094,8 @@ def render(*, force_refresh: bool = False) -> None:
             border: 0 !important;
         }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stBaseButton-primary"] p {
-            margin: 0;
-            font-size: 12px;
+            font-size: 14px;
             font-weight: 700;
-            line-height: 1.35rem;
             color: #fff;
         }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stBaseButton-secondary"] {
@@ -1113,10 +1110,8 @@ def render(*, force_refresh: bool = False) -> None:
             border: 1px solid #b42318 !important;
         }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stBaseButton-secondary"] p {
-            margin: 0;
-            font-size: 12px;
+            font-size: 14px;
             font-weight: 700;
-            line-height: 1.35rem;
             color: #b42318;
         }
         </style>
