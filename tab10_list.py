@@ -434,24 +434,30 @@ def _class_columns(klasses: set[int]) -> list[int]:
 
 def _org_spec(year: int, rows: list[dict]) -> dict | None:
     """부-학년-반으로 묶인 회원만 조직 구분 데이터로 만든다."""
-    members: list[dict] = []
+    pending: list[dict] = []
     seen: set[int] = set()
     grades_by_dept: dict[int, set[int]] = {}
     klasses: set[int] = set()
+    pair_counts: dict[tuple[str, str], int] = {}
     for row in rows:
         parsed = _parse_org_div(_org_div_text(row))
         member_id = _as_int(row.get("id"))
         if parsed is None or member_id is None or member_id in seen:
             continue
-        label = f"{str(row.get('name') or '').strip()}{str(row.get('name_distinct') or '').strip()}"
+        name = str(row.get("name") or "").strip()
+        distinct = str(row.get("name_distinct") or "").strip()
+        label = f"{name}{distinct}"
         if not label:
             continue
         dept, grade, klass = parsed
         seen.add(member_id)
-        members.append(
+        pair = (name, distinct)
+        pair_counts[pair] = pair_counts.get(pair, 0) + 1
+        pending.append(
             {
                 "id": member_id,
                 "label": label,
+                "pair": pair,
                 "dept": dept,
                 "grade": grade,
                 "klass": klass,
@@ -459,6 +465,17 @@ def _org_spec(year: int, rows: list[dict]) -> dict | None:
         )
         grades_by_dept.setdefault(dept, set()).add(grade)
         klasses.add(klass)
+    members = [
+        {
+            "id": item["id"],
+            "label": item["label"],
+            "dept": item["dept"],
+            "grade": item["grade"],
+            "klass": item["klass"],
+            "dup": pair_counts[item["pair"]] > 1,
+        }
+        for item in pending
+    ]
     if not members:
         return None
     members.sort(key=lambda item: (item["dept"], item["grade"], item["klass"], item["label"], item["id"]))

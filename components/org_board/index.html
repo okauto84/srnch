@@ -143,6 +143,7 @@
       border-radius: 4px;
       touch-action: none;
     }
+    .chip.dup { color: #1565c0; }
     .chip:hover { background: rgba(255, 255, 255, 0.72); }
     .chip.dragging { opacity: 0.28; }
     body.is-dragging, body.is-dragging .chip { cursor: grabbing; }
@@ -162,6 +163,7 @@
       font-weight: 700;
       white-space: nowrap;
     }
+    .ghost.dup { color: #1565c0; }
     .footer {
       display: flex;
       flex-direction: column;
@@ -332,7 +334,7 @@
     function makeChip(item) {
       const chip = document.createElement("button");
       chip.type = "button";
-      chip.className = "chip";
+      chip.className = item.dup ? "chip dup" : "chip";
       chip.textContent = item.label;
       chip.dataset.id = String(item.id);
       chip.dataset.key = "member-" + item.id;
@@ -391,6 +393,7 @@
         state.set(id, {
           id: Number(member.id),
           label: String(member.label || ""),
+          dup: !!member.dup,
           dept: Number(member.dept),
           grade: Number(member.grade),
           klass: Number(member.klass),
@@ -519,7 +522,7 @@
 
     function beginDrag(chip, event) {
       const ghost = document.createElement("div");
-      ghost.className = "ghost";
+      ghost.className = chip.classList.contains("dup") ? "ghost dup" : "ghost";
       ghost.textContent = chip.textContent;
       document.body.appendChild(ghost);
       chip.classList.add("dragging");
