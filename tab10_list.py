@@ -983,6 +983,23 @@ def render(*, force_refresh: bool = False) -> None:
         @keyframes member-chat-spin {
             to { transform: rotate(360deg); }
         }
+        [data-testid="stElementContainer"]:has([data-testid="stCustomComponentV1"]) {
+            margin-bottom: 0 !important;
+        }
+        [data-testid="stElementContainer"]:has([data-testid="stCustomComponentV1"]) + [data-testid="stElementContainer"] {
+            margin-top: -0.85rem !important;
+        }
+        .roster-title {
+            margin: 0 0 0.1rem 0 !important;
+            line-height: 1.25;
+        }
+        [data-testid="stElementContainer"]:has(.roster-title) [data-testid="stMarkdownContainer"] {
+            margin-bottom: 0;
+        }
+        [data-testid="stCaptionContainer"] {
+            margin-top: 0 !important;
+            margin-bottom: 0.15rem !important;
+        }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) {
             gap: 0.15rem;
         }
@@ -1003,15 +1020,16 @@ def render(*, force_refresh: bool = False) -> None:
         }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stTextInput"] [data-baseweb="input"],
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stTextInput"] [data-baseweb="base-input"] {
-            min-height: 1.2rem !important;
-            height: 1.2rem !important;
+            min-height: 0.8rem !important;
+            height: 0.8rem !important;
         }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stTextInput"] input {
-            min-height: 1.2rem;
-            height: 1.2rem;
-            padding-top: 0;
-            padding-bottom: 0;
-            font-size: 0.75rem;
+            min-height: 0.8rem !important;
+            height: 0.8rem !important;
+            padding-top: 0 !important;
+            padding-bottom: 0 !important;
+            font-size: 0.7rem;
+            line-height: 0.8rem;
         }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stHorizontalBlock"]:has([data-testid="stTextInput"]):has([data-testid="stBaseButton-secondary"]) {
             flex-wrap: nowrap !important;
@@ -1055,13 +1073,14 @@ def render(*, force_refresh: bool = False) -> None:
             max-width: 100% !important;
         }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stButton"] button {
-            min-height: 0;
-            height: auto;
-            padding: 8px 28px;
+            min-height: 0 !important;
+            height: 1.35rem !important;
+            max-height: 1.35rem !important;
+            padding: 0 16px !important;
             border-radius: 8px !important;
-            font-size: 14px;
+            font-size: 12px;
             font-weight: 700;
-            line-height: 1.2;
+            line-height: 1.35rem !important;
             white-space: nowrap;
         }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stBaseButton-primary"] {
@@ -1076,8 +1095,10 @@ def render(*, force_refresh: bool = False) -> None:
             border: 0 !important;
         }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stBaseButton-primary"] p {
-            font-size: 14px;
+            margin: 0;
+            font-size: 12px;
             font-weight: 700;
+            line-height: 1.35rem;
             color: #fff;
         }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stBaseButton-secondary"] {
@@ -1092,8 +1113,10 @@ def render(*, force_refresh: bool = False) -> None:
             border: 1px solid #b42318 !important;
         }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stBaseButton-secondary"] p {
-            font-size: 14px;
+            margin: 0;
+            font-size: 12px;
             font-weight: 700;
+            line-height: 1.35rem;
             color: #b42318;
         }
         </style>
@@ -1116,7 +1139,7 @@ def render(*, force_refresh: bool = False) -> None:
     if indexed:
         _render_org_board(int(selected_year), indexed)
 
-    st.markdown("**인원 현황**")
+    st.markdown('<p class="roster-title"><strong>인원 현황</strong></p>', unsafe_allow_html=True)
     st.caption(f"총 {len(indexed)}건")
     if not indexed:
         st.info(f"{selected_year}년 표시할 회원이 없습니다.")
