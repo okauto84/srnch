@@ -143,6 +143,15 @@
       border-radius: 4px;
       touch-action: none;
     }
+    .chip .sex,
+    .ghost .sex {
+      font-size: 0.68em;
+      font-weight: 700;
+      line-height: 0;
+      margin-left: 1px;
+      position: relative;
+      top: -0.45em;
+    }
     .chip.dup { color: #1565c0; }
     .chip:hover { background: rgba(255, 255, 255, 0.72); }
     .chip.dragging { opacity: 0.28; }
@@ -331,11 +340,21 @@
       statusEl.textContent = count ? "저장 전 변경 " + count + "건" : "";
     }
 
+    function fillName(el, item) {
+      el.replaceChildren(document.createTextNode(item.label || ""));
+      if (item.gender === "남" || item.gender === "여") {
+        const mark = document.createElement("sup");
+        mark.className = "sex";
+        mark.textContent = item.gender;
+        el.appendChild(mark);
+      }
+    }
+
     function makeChip(item) {
       const chip = document.createElement("button");
       chip.type = "button";
       chip.className = item.dup ? "chip dup" : "chip";
-      chip.textContent = item.label;
+      fillName(chip, item);
       chip.dataset.id = String(item.id);
       chip.dataset.key = "member-" + item.id;
       chip.addEventListener("pointerdown", onChipPointerDown);
@@ -393,6 +412,7 @@
         state.set(id, {
           id: Number(member.id),
           label: String(member.label || ""),
+          gender: member.gender === "남" || member.gender === "여" ? member.gender : "",
           dup: !!member.dup,
           dept: Number(member.dept),
           grade: Number(member.grade),
@@ -523,7 +543,9 @@
     function beginDrag(chip, event) {
       const ghost = document.createElement("div");
       ghost.className = chip.classList.contains("dup") ? "ghost dup" : "ghost";
-      ghost.textContent = chip.textContent;
+      Array.from(chip.childNodes).forEach(function (node) {
+        ghost.appendChild(node.cloneNode(true));
+      });
       document.body.appendChild(ghost);
       chip.classList.add("dragging");
       document.body.classList.add("is-dragging");

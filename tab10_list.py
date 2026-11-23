@@ -446,6 +446,7 @@ def _org_spec(year: int, rows: list[dict]) -> dict | None:
             continue
         name = str(row.get("name") or "").strip()
         distinct = str(row.get("name_distinct") or "").strip()
+        gender = str(row.get("gender") or "").strip()
         label = f"{name}{distinct}"
         if not label:
             continue
@@ -457,6 +458,7 @@ def _org_spec(year: int, rows: list[dict]) -> dict | None:
             {
                 "id": member_id,
                 "label": label,
+                "gender": gender if gender in ("남", "여") else "",
                 "pair": pair,
                 "dept": dept,
                 "grade": grade,
@@ -469,6 +471,7 @@ def _org_spec(year: int, rows: list[dict]) -> dict | None:
         {
             "id": item["id"],
             "label": item["label"],
+            "gender": item["gender"],
             "dept": item["dept"],
             "grade": item["grade"],
             "klass": item["klass"],
