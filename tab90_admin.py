@@ -19,8 +19,11 @@ from supabase import Client, create_client
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+YEAR_OPTIONS = (2026, 2027)
+
 MEMBER_FIELDS = (
     "id",
+    "year",
     "name",
     "name_distinct",
     "children_group",
@@ -320,7 +323,7 @@ class DimodeClient:
         if result != "success":
             raise RuntimeError(f"디모데 로그인 실패: {result}")
 
-    def _load_signal(self) -> None:
+    def _load_signal(self, year: int) -> None:
         members_page = self.session.get(
             self.members_url.split("#")[0],
             headers={"Referer": self.site_root},
@@ -328,14 +331,11 @@ class DimodeClient:
         )
         members_page.raise_for_status()
 
-        year_match = re.search(r"[?&]year=(\d{4})", self.members_url)
-        base_year = year_match.group(1) if year_match else "2026"
-
         app_js = self.session.get(
             f"{self.site_root}/load/appJs",
             params={
                 "program": "member",
-                "baseYear": base_year,
+                "baseYear": str(year),
                 "lang": "ko",
                 "interface": "desktop",
                 "windowType": "current",
@@ -353,11 +353,8 @@ class DimodeClient:
         self.signal = match.group(1)
         self.group_category = _children_group_category(app_js.text)
 
-    def fetch_members(self) -> list[dict[str, Any]]:
-        self._load_signal()
-
-        year_match = re.search(r"[?&]year=(\d{4})", self.members_url)
-        base_year = int(year_match.group(1)) if year_match else 2026
+    def fetch_members(self, year: int) -> list[dict[str, Any]]:
+        self._load_signal(year)
 
         members: list[dict[str, Any]] = []
         skip = 0
@@ -368,7 +365,7 @@ class DimodeClient:
             response = self.session.post(
                 f"{self.site_root}/api/person/list",
                 data={
-                    "baseYear": base_year,
+                    "baseYear": int(year),
                     "program": "member",
                     "log": "false",
                     "groupCategory": self.group_category,
@@ -408,20 +405,92 @@ class DimodeClient:
         return members
 
 
-def upsert_members(client: Client, members: list[dict[str, Any]]) -> int:
-    # 전체 동기화: 기존 데이터 삭제 후 재적재
-    client.table("srnch_members").delete().gte("id", 0).execute()
+def _rows(client: Client, columns: str, year: int | None = None) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
+    start = 0
+    page = 1000
+    while True:
+        query = client.table("srnch_members").select(columns)
+        if year is not None:
+            query = query.eq("year", year)
+        response = query.range(start, start + page - 1).execute()
+        batch = response.data or []
+        found.extend(row for row in batch if isinstance(row, dict))
+        if len(batch) < page:
+            return found
+        start += page
 
-    batch_size = 100
-    inserted = 0
-    for i in range(0, len(members), batch_size):
-        chunk = [{k: row.get(k) for k in MEMBER_FIELDS} for row in members[i : i + batch_size]]
+
+def _person_key(name: object, distinct: object) -> tuple[str, str]:
+    return (str(name or "").strip(), str(distinct or "").strip())
+
+
+def _pop_named(
+    buckets: dict[tuple[str, str], list[dict[str, Any]]],
+    key: tuple[str, str],
+    matched: set[int],
+) -> dict[str, Any] | None:
+    remaining = [row for row in buckets.get(key, []) if int(row["id"]) not in matched]
+    if not remaining:
+        buckets[key] = []
+        return None
+    chosen = remaining.pop(0)
+    buckets[key] = remaining
+    return chosen
+
+
+def sync_year_members(client: Client, members: list[dict[str, Any]], year: int) -> int:
+    """선택한 연도 행만 고친다. 다른 연도의 같은 학생은 그대로 둔다."""
+    existing = _rows(client, "id,name,name_distinct", year)
+    used_ids = {int(row["id"]) for row in _rows(client, "id") if row.get("id") is not None}
+    by_id = {int(row["id"]): row for row in existing if row.get("id") is not None}
+    buckets: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in existing:
+        buckets.setdefault(_person_key(row.get("name"), row.get("name_distinct")), []).append(row)
+
+    matched: set[int] = set()
+    updates: list[dict[str, Any]] = []
+    inserts: list[dict[str, Any]] = []
+    next_id = max(used_ids, default=0)
+
+    for member in members:
+        dimode_id = int(member["id"])
+        payload = {key: member.get(key) for key in MEMBER_FIELDS if key != "id"}
+        payload["year"] = int(year)
+        key = _person_key(payload.get("name"), payload.get("name_distinct"))
+        target = by_id.get(dimode_id) if dimode_id not in matched else None
+        if target is None:
+            target = _pop_named(buckets, key, matched)
+        if target is not None:
+            row_id = int(target["id"])
+            matched.add(row_id)
+            payload["id"] = row_id
+            updates.append(payload)
+            continue
+        row_id = dimode_id if dimode_id not in used_ids else next_id + 1
+        next_id = max(next_id, row_id)
+        used_ids.add(row_id)
+        payload["id"] = row_id
+        inserts.append(payload)
+
+    for start in range(0, len(updates), 100):
+        chunk = []
+        for row in updates[start : start + 100]:
+            saved = dict(row)
+            saved.pop("created_at", None)
+            chunk.append(saved)
         client.table("srnch_members").upsert(chunk, on_conflict="id").execute()
-        inserted += len(chunk)
-    return inserted
+    for start in range(0, len(inserts), 100):
+        client.table("srnch_members").insert(inserts[start : start + 100]).execute()
+
+    stale = [int(row["id"]) for row in existing if int(row["id"]) not in matched]
+    for start in range(0, len(stale), 100):
+        chunk = stale[start : start + 100]
+        client.table("srnch_members").delete().in_("id", chunk).eq("year", int(year)).execute()
+    return len(updates) + len(inserts)
 
 
-def sync_members_from_dimode() -> tuple[int, list[dict[str, Any]]]:
+def sync_members_from_dimode(year: int) -> tuple[int, list[dict[str, Any]]]:
     client_dimode = DimodeClient(
         base_url=_secret("W_DIMODE_URL"),
         login_id=_secret("W_DIMODE_ID"),
@@ -429,8 +498,10 @@ def sync_members_from_dimode() -> tuple[int, list[dict[str, Any]]]:
         members_url=_secret("W_DIMODE_URL_MEMBERS"),
     )
     client_dimode.login()
-    members = client_dimode.fetch_members()
-    count = upsert_members(_get_supabase(), members)
+    members = client_dimode.fetch_members(int(year))
+    for member in members:
+        member["year"] = int(year)
+    count = sync_year_members(_get_supabase(), members, int(year))
     return count, members[:20]
 
 
@@ -480,6 +551,12 @@ def render() -> None:
         st.error("다음 Streamlit secrets 변수가 필요합니다: " + ", ".join(missing_supabase))
         return
 
+    if st.session_state.get("admin_sync_year") not in YEAR_OPTIONS:
+        st.session_state["admin_sync_year"] = YEAR_OPTIONS[0]
+    year_col, _ = st.columns([1, 5])
+    with year_col:
+        selected_year = st.selectbox("연도", options=list(YEAR_OPTIONS), key="admin_sync_year")
+
     sync_col, batch_col, _ = st.columns([1.3, 1.5, 3.2])
     with sync_col:
         sync_clicked = st.button("회원 동기화 실행", type="primary")
@@ -495,11 +572,11 @@ def render() -> None:
         else:
             with st.spinner("로그인 및 회원 수집 중..."):
                 try:
-                    count, preview = sync_members_from_dimode()
+                    count, preview = sync_members_from_dimode(int(selected_year))
                 except Exception as exc:  # noqa: BLE001
                     st.error(f"동기화 실패: {exc}")
                     return
-            st.success(f"srnch_members에 {count}건 적재 완료")
+            st.success(f"srnch_members {selected_year}년 {count}건을 반영했습니다.")
             if preview:
                 st.dataframe(preview, use_container_width=True)
 
