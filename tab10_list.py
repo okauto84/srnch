@@ -751,7 +751,7 @@ def _queue_member_selection(rows: list[dict], selected: list[int]) -> None:
 
 
 def _render_member_add(year: int) -> None:
-    """그리드와 조직 구분 사이의 회원 입력."""
+    """인원 현황 아래 회원 수정."""
     _apply_member_form()
     added = st.session_state.pop("member_added_msg", "")
     deleted_msg = st.session_state.pop("member_deleted_msg", "")
@@ -861,7 +861,7 @@ def _org_saved_text(moved: int, deleted: int) -> str:
 
 
 def _render_org_board(year: int, rows: list[dict]) -> None:
-    """그리드 아래 조직 구분. 이동·삭제는 화면 메모리에 두고 저장 때 DB에 반영한다."""
+    """인원 현황 위 조직 구분. 이동·삭제는 화면 메모리에 두고 저장 때 DB에 반영한다."""
     st.markdown("**조직 구분**")
     saved = st.session_state.pop("org_saved_msg", "")
     error = st.session_state.pop("org_error_msg", "")
@@ -990,18 +990,28 @@ def render(*, force_refresh: bool = False) -> None:
             margin-bottom: 0;
         }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stTextInput"] label {
-            font-size: 0.75rem;
+            font-size: 0.68rem;
+            line-height: 1.1;
             min-height: 0;
+            margin-bottom: 0.05rem;
+            padding-bottom: 0;
         }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stTextInput"] label p {
-            font-size: 0.75rem;
+            font-size: 0.68rem;
+            line-height: 1.1;
+            margin: 0;
+        }
+        [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stTextInput"] [data-baseweb="input"],
+        [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stTextInput"] [data-baseweb="base-input"] {
+            min-height: 1.2rem !important;
+            height: 1.2rem !important;
         }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stTextInput"] input {
-            min-height: 1.65rem;
-            height: 1.65rem;
-            padding-top: 0.1rem;
-            padding-bottom: 0.1rem;
-            font-size: 0.82rem;
+            min-height: 1.2rem;
+            height: 1.2rem;
+            padding-top: 0;
+            padding-bottom: 0;
+            font-size: 0.75rem;
         }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stHorizontalBlock"]:has([data-testid="stTextInput"]):has([data-testid="stBaseButton-secondary"]) {
             flex-wrap: nowrap !important;
@@ -1009,16 +1019,40 @@ def render(*, force_refresh: bool = False) -> None:
             overflow-y: hidden !important;
             width: 100% !important;
             max-width: 100% !important;
+            gap: 0.35rem !important;
         }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stHorizontalBlock"]:has([data-testid="stTextInput"]):has([data-testid="stBaseButton-secondary"]) > [data-testid="stColumn"] {
             flex: 0 0 auto !important;
             width: auto !important;
-            min-width: max-content !important;
+            min-width: 0 !important;
             max-width: none !important;
             overflow: visible !important;
         }
+        [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stHorizontalBlock"]:has([data-testid="stTextInput"]):has([data-testid="stBaseButton-secondary"]) > [data-testid="stColumn"]:nth-child(1) {
+            flex-basis: 6.25rem !important;
+            width: 6.25rem !important;
+            min-width: 6.25rem !important;
+            max-width: 6.25rem !important;
+        }
+        [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stHorizontalBlock"]:has([data-testid="stTextInput"]):has([data-testid="stBaseButton-secondary"]) > [data-testid="stColumn"]:nth-child(2),
+        [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stHorizontalBlock"]:has([data-testid="stTextInput"]):has([data-testid="stBaseButton-secondary"]) > [data-testid="stColumn"]:nth-child(3),
+        [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stHorizontalBlock"]:has([data-testid="stTextInput"]):has([data-testid="stBaseButton-secondary"]) > [data-testid="stColumn"]:nth-child(5) {
+            flex-basis: 2.7rem !important;
+            width: 2.7rem !important;
+            min-width: 2.7rem !important;
+            max-width: 2.7rem !important;
+        }
+        [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stHorizontalBlock"]:has([data-testid="stTextInput"]):has([data-testid="stBaseButton-secondary"]) > [data-testid="stColumn"]:nth-child(4),
+        [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stHorizontalBlock"]:has([data-testid="stTextInput"]):has([data-testid="stBaseButton-secondary"]) > [data-testid="stColumn"]:nth-child(6) {
+            flex-basis: 2.35rem !important;
+            width: 2.35rem !important;
+            min-width: 2.35rem !important;
+            max-width: 2.35rem !important;
+        }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stTextInput"] {
-            min-width: 4.75rem;
+            width: 100% !important;
+            min-width: 0 !important;
+            max-width: 100% !important;
         }
         [data-testid="stVerticalBlock"]:has(.member-quick-add) [data-testid="stButton"] button {
             min-height: 0;
@@ -1079,6 +1113,10 @@ def render(*, force_refresh: bool = False) -> None:
         st.error(f"회원 목록을 불러오지 못했습니다: {exc}")
         return
 
+    if indexed:
+        _render_org_board(int(selected_year), indexed)
+
+    st.markdown("**인원 현황**")
     st.caption(f"총 {len(indexed)}건")
     if not indexed:
         st.info(f"{selected_year}년 표시할 회원이 없습니다.")
@@ -1100,6 +1138,4 @@ def render(*, force_refresh: bool = False) -> None:
         )
         _queue_member_selection(indexed, list(selected_state.selection.rows))
     _render_member_add(int(selected_year))
-    if indexed:
-        _render_org_board(int(selected_year), indexed)
     _render_chat(indexed)
