@@ -13,7 +13,7 @@ import streamlit.components.v1 as components
 from openai import OpenAI
 from supabase import create_client
 
-VISIBLE_ROWS = 10
+VISIBLE_ROWS = 7
 GRID_ROW_HEIGHT = 35
 YEAR_OPTIONS = (2026, 2027)
 
